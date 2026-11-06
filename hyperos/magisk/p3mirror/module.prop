@@ -1,0 +1,6 @@
+id=tb710fu_p3mirror
+name=TB710FU P3 mirror
+version=4.0
+versionCode=4
+author=tb710fu
+description=While Xiaomi Interconnect PC mirroring (com.xiaomi.mirror SinkPCActivity) is in front: panel unmanaged + 3x3 matrix fitted to the factory P3 3D LUT, so a Mac rendering the "Xiaomi Pad" display in Display P3 is shown in P3. Restores colour setting and matrix afterwards.

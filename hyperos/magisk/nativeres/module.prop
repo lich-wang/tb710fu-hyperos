@@ -1,0 +1,6 @@
+id=tb710fu_nativeres
+name=TB710FU native resolution
+version=1.0
+versionCode=1
+author=tb710fu
+description=Replaces the port's /system/lwky/set_res.sh (wm size 2000x3198) so the display stays at the panel's native 3200x2000; mirroring then gets 3200x2000 instead of 3198x2000.
