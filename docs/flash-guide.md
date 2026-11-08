@@ -11,6 +11,32 @@
 
 ---
 
+## 快速路线：脚本构建完整刷机包并刷入 🔧
+
+下面第 1–5 步的手工流程已经整理成两个脚本。输入和第 0 步一样（自己下载，放到 `work/`），产物是一个**只在你本机**的 9008 整包，
+不要再分发（里面有小米、联想、高通和移植作者的镜像）。
+
+```bash
+# 构建：核对所有输入的哈希 → v3 启动链 → 构建 HyperOS 4 super（两种）→ 组装 9008 整包
+python3 tools/build_package.py            # 输出 work/package/TB710FU-HyperOS4-OS4.0.5.0/
+
+# 刷机（平板进 9008）
+python3 tools/flash_package.py backup     # 第 1 步的完整备份，第一次必须做
+python3 tools/flash_package.py full       # 整包线刷 + 清数据，super 不带"查找设备"；写后逐个读回比对
+#   → 开机向导里不要登录小米账号；完成后再进 9008：
+python3 tools/flash_package.py super-find # 换成带"查找设备"的 super，数据保留
+```
+
+- 整包 = 移植包的 GPT 和 A/B 两槽固件（覆盖了 495 补充包的那 9 个文件，与参考设备逐字节一致）
+  + A 槽 v3 启动链 + HyperOS 4 super；等于手工做完第 2、3、5 步的结果。Magisk（第 4 步）仍按下文手工做。
+- 输入找不到或哈希对不上时直接停下并说明是哪个文件；构建步骤有缓存，重跑会跳过已完成的部分。
+  移植包可以给 zip（`--port-zip`）或解压后的目录（`--port-dir`），补充包 `--supplement`，OTA `--ota`。
+- `flash_package.py` 每次写入前都会列出分区、源文件和 sha256，要你输入 `yes`；没有备份（含全部唯一分区）就拒绝写。
+  平板上的分区表与原厂不同（比如装过 ArmadaOS 双系统）时会列出差异，要再输入 `restore stock` 才继续——整包会恢复原厂分区表。
+- `--dry-run` 只做离线检查并打印将执行的 edl 命令。读回发现不一致时不复位平板，保持在 9008 里等你处理。
+- 状态：组装整包已用本机的移植包、补充包和现成 super 跑通（固件与 v3 启动链哈希全部一致）；
+  从 OTA 重新构建 super 的部分只是把第 5 步串起来，未完整跑过；刷机脚本只在模拟的 edl 上测过，还没上真机。
+
 ## 0. 前提
 
 | 项目 | 要求 |
@@ -23,7 +49,7 @@
 Mac 上的工具：
 
 ```bash
-brew install android-platform-tools payload-dumper-go erofs-utils zstd p7zip python@3.12
+brew install android-platform-tools payload-dumper-go erofs-utils zstd p7zip python@3.12 apktool openjdk
 python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl
 ```
 

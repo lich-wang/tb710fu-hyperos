@@ -43,6 +43,14 @@
 | `fastboot devices` 有设备 | fastboot（misc 里的 bootonce-bootloader）：`fastboot reboot` |
 | 都没有 | 平板关机、睡眠或线没插好：请用户检查 |
 
+## 三点五、脚本路线
+
+用户选择脚本路线时（`tools/build_package.py` + `tools/flash_package.py`，见指南"快速路线"），上面的规则照样适用：
+- 先跑 `flash_package.py full --dry-run`，把它打印的写入清单（分区、文件、sha256、分区表差异）原样给用户看，
+  用户在对话里明确同意后，才用 `--yes` 执行真正的写入。`super-find` 同样处理。
+- 脚本报错（输入哈希不符、读回不一致、分区表差异）时停下，把原始输出给用户，不要改脚本或加参数绕过。
+- 读回不一致时脚本不会复位平板：不要让用户拔线或重启，先报告。
+
 ## 四、阶段与检查点
 
 严格按 `docs/flash-guide.md` 的顺序。每一阶段开始前确认上一阶段的检查点已通过；做完向用户报告结果和下一步。
