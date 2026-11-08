@@ -46,7 +46,8 @@ ABL（未解锁，信任 AOSP testkey）
 ## 仓库结构
 
 ```
-tools/          make_v3_bootchain.py（v3 启动链）、build_os4.py（HyperOS 4 分区构建）、make_super.py、lp_unpack.py、
+tools/          build_package.py（构建完整 9008 刷机包）、flash_package.py（备份 / 刷入 / 读回校验）、package/（两者共用的常量与已验证哈希）、
+                make_v3_bootchain.py（v3 启动链）、build_os4.py（HyperOS 4 分区构建）、make_super.py、lp_unpack.py、
                 erofs_meta.py、sepolicy_fix.py、flash_super.sh、mac/displaymode.swift
 hyperos/        笔按键映射、SELinux 兼容策略、RRO overlay 源码、Magisk 模块
 extras/         Mac 无线副屏色彩测量与描述文件
@@ -59,6 +60,10 @@ work/           （不入库）你自己设备的备份、底包、构建产物
 
 完整步骤：**[docs/flash-guide.md](docs/flash-guide.md)**——从联想官方 ZUI 1.5.04.495 开始，进 9008 备份，
 线刷 HyperOS 3 移植包，换 v3 启动链，构建并刷入 HyperOS 4。
+
+也可以用脚本一步到位：`tools/build_package.py` 用你自己下载的移植包、495 补充包和 yupei OTA 在本机生成完整的 9008 刷机包，
+`tools/flash_package.py` 负责备份、整包线刷（带确认和读回校验）和开机向导后的第二阶段。见指南的
+[快速路线](docs/flash-guide.md#快速路线脚本构建完整刷机包并刷入-)。本仓库不提供现成刷机包。
 
 > **推荐用 AI Agent 来刷**：让一个能执行命令的 AI 编程 Agent 读取 [`AGENT.md`](AGENT.md) 和刷机指南，
 > 由它执行命令、校验结果，需要你动手时它会停下来告诉你。
