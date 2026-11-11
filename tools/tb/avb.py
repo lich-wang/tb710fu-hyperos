@@ -116,6 +116,14 @@ def parse_footer(tail):
     return off, size
 
 
+def footer_info(tail):
+    """AVB footer -> {'original_size', 'vbmeta_offset', 'vbmeta_size'} or None."""
+    if len(tail) < FOOTER_SIZE or tail[-64:-60] != b'AVBf':
+        return None
+    _, _, _, orig, off, size = struct.unpack('>4sLLQQQ28x', tail[-64:])
+    return {'original_size': orig, 'vbmeta_offset': off, 'vbmeta_size': size}
+
+
 def find_vbmeta(data):
     """vbmeta blob of a vbmeta image, or of a whole image with an AVB footer."""
     if data[:4] == b'AVB0':
