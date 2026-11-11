@@ -21,3 +21,4 @@ credentials*
 __pycache__/
 *.pyc
 /tools/avb
+edl_config.json
