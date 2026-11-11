@@ -15,7 +15,7 @@ Rollback indexes are exactly the device's current values: never raised, so stock
 
 Needs AOSP avbtool + test keys in tools/avb/ and mkbootimg/unpack_bootimg in tools/mkbootimg/, and lz4.
 """
-import glob, json, os, re, shutil, subprocess, sys, tempfile, time
+import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
 from .backup import file_sha256
 from .sources import REPO, TOOLS, WORK, SourceError
@@ -166,11 +166,14 @@ def min_partition_size(img):
     return hi
 
 
-def hashtree(src, dest, name, props=()):
+def hashtree(src, dest, name, props=(), salt_seed=''):
+    """Hashtree footer with a fixed salt (from the partition name and the device), so builds are reproducible
+    and the find / nofind variants share the same vendor side (same vbmeta)."""
     shutil.copyfile(src, dest)
     p = min_partition_size(dest)
+    salt = hashlib.sha256(f'tb710fu-hashtree:{salt_seed}:{name}'.encode()).hexdigest()
     cmd = ['add_hashtree_footer', '--image', dest, '--partition_name', name, '--partition_size', p,
-           '--hash_algorithm', 'sha256', '--do_not_generate_fec']
+           '--hash_algorithm', 'sha256', '--do_not_generate_fec', '--salt', salt]
     for k, v in props:
         cmd += ['--prop', f'{k}:{v}']
     avbtool(*cmd)
@@ -261,7 +264,8 @@ def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None,
         src = os.path.join(vendor_dir if n in VBMETA_TREE else framework_dir, f'{n}.img')
         props = [(k, v) for k, v in stock_props if k.startswith(f'com.android.build.{n}.')] if n in VBMETA_TREE else []
         print(f'  {n}：hashtree …', flush=True)
-        res['partition_sizes'][n] = hashtree(src, os.path.join(out, f'{n}.img'), n, props)
+        res['partition_sizes'][n] = hashtree(src, os.path.join(out, f'{n}.img'), n, props,
+                                             prof['device'].get('chip_serial', ''))
 
     # 5. vbmeta_system: system, system_ext, product + the device's own pvmfw
     pv = os.path.join(work, 'pvmfw.img')

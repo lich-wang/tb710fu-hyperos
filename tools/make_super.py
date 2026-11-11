@@ -2,7 +2,7 @@
 """Build a raw super image (liblp metadata v10.2, virtual A/B flag) from partition images.
 
 usage: make_super.py OUT.img DEVICE_SIZE name=img [name=img ...]
-Every name gets an _a partition with the image and an empty _b partition, in groups
+Every name gets a partition in the given slot (default _a) with the image and an empty one in the other slot, in groups
 qti_dynamic_partitions_a / _b. Only the used region is written (geometry + metadata +
 partition data); the rest of the physical super partition is left untouched on flash.
 """
@@ -21,7 +21,8 @@ def pad(b, n):
     return b + b'\0' * (n - len(b))
 
 
-def build(out, dev_size, parts):
+def build(out, dev_size, parts, slot='_a'):
+    other = '_b' if slot == '_a' else '_a'
     first_sector = 2048                       # 1 MiB: reserved + 2 geometry + 2*3 metadata slots fit below
     assert (4096 + 2 * 4096 + 2 * SLOTS * MD_MAX) <= first_sector * SECTOR
     names = sorted(parts)
@@ -43,10 +44,13 @@ def build(out, dev_size, parts):
     pt, ex = b'', b''
     ext_i = 0
     for n, off, size, size_al in layout:
-        pt += pad(f'{n}_a'.encode(), 36) + struct.pack('<IIII', 0, ext_i, 1, 1)
+        # the slot being written gets the image (group 1 or 2 = qti_dynamic_partitions_a/_b), the other one is empty
+        g_this, g_other = (1, 2) if slot == '_a' else (2, 1)
+        entries = {slot: pad(f'{n}{slot}'.encode(), 36) + struct.pack('<IIII', 0, ext_i, 1, g_this)}
         ex += struct.pack('<QIQI', size_al // SECTOR, 0, off // SECTOR, 0)
         ext_i += 1
-        pt += pad(f'{n}_b'.encode(), 36) + struct.pack('<IIII', 0, ext_i, 0, 2)
+        entries[other] = pad(f'{n}{other}'.encode(), 36) + struct.pack('<IIII', 0, ext_i, 0, g_other)
+        pt += entries['_a'] + entries['_b']
     gr = pad(b'default', 36) + struct.pack('<IQ', 0, 0)
     gr += pad(b'qti_dynamic_partitions_a', 36) + struct.pack('<IQ', 0, group_max)
     gr += pad(b'qti_dynamic_partitions_b', 36) + struct.pack('<IQ', 0, group_max)
@@ -85,7 +89,7 @@ def build(out, dev_size, parts):
                     f.write(b)
         f.truncate(used_end)
     for n, off, size, size_al in layout:
-        print(f'  {n+"_a":16} start {off/1e6:9.1f} MB  size {size/1e6:9.1f} MB')
+        print(f'  {n+slot:16} start {off/1e6:9.1f} MB  size {size/1e6:9.1f} MB')
     print(f'super: device {dev_size/1e9:.3f} GB, group max {group_max/1e9:.3f} GB, written {used_end/1e9:.3f} GB')
 
 
