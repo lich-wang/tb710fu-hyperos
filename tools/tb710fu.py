@@ -11,6 +11,7 @@
   tb710fu.py vendor                    vendor side of the new super from the Lenovo stock parts (docs/porting.md)
   tb710fu.py framework                 system, system_ext, product from the imported Xiaomi images (docs/porting.md)
   tb710fu.py bootchain                 boot chain + verity footers, test-key signed at the device's rollback indexes
+  tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
 device profile (work/device/latest.json: slot, rollback indexes, super layout, firmware fingerprint) that
@@ -23,7 +24,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, bootchain, check, framework, lenovo, sources, vendor, xiaomi  # noqa: E402
+from tb import backup, bootchain, check, framework, lenovo, package, sources, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -150,6 +151,14 @@ def cmd_bootchain(a):
     return 0 if bootchain.report(out, res) else 1
 
 
+def cmd_package(a):
+    try:
+        out, m = package.build(a.find, a.nofind)
+    except sources.SourceError as e:
+        sys.exit(f'\n{e}')
+    return 0 if package.report(out, m) else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -188,9 +197,13 @@ def main():
     c.add_argument('--backup', help='设备完整备份（默认最新）')
     c.add_argument('--profile', help='设备档案（默认 work/device/latest.json）')
     c.add_argument('--no-verity', action='store_true', help='vbmeta flags=1，关闭 dm-verity（备用方案）')
+    k = sub.add_parser('package', help='打成这台平板的刷机包（带/不带查找设备两个 super + manifest）')
+    k.add_argument('--find', help='带查找设备的 bootchain 输出目录（默认最新）')
+    k.add_argument('--nofind', help='不带查找设备的 bootchain 输出目录（默认最新）')
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
-            'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain}[a.cmd](a)
+            'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain,
+            'package': cmd_package}[a.cmd](a)
 
 
 if __name__ == '__main__':

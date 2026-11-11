@@ -111,6 +111,29 @@ python3 tools/tb710fu.py bootchain --no-verity  # 备用：flags=1，关掉 dm-v
   - 用 CN 414 + yupei OS4.0.5.0 实测：全部通过，2 分 30 秒。vendor_boot 重新打包后，头部参数、dtb、bootconfig 和原厂完全一致，ramdisk 里只有 fstab 多了 7 行。
 - **内核**：414 的内核是 6.1.128，和 vendor_dlkm 模块的 vermagic 一致。平板上的底层固件是 495 的（abl、xbl 和 414 不同，本项目不写底层固件），两者能否配合要上真机确认（推测问题不大：现在的 v3 链也是 6.1.128 内核跑在 495 固件上）。
 
+### 刷机包（package）
+
+```bash
+python3 tools/tb710fu.py framework && python3 tools/tb710fu.py framework --no-finddevice
+python3 tools/tb710fu.py bootchain --framework-dir work/build/framework/<版本>
+python3 tools/tb710fu.py bootchain --framework-dir work/build/framework/<版本>-nofind
+python3 tools/tb710fu.py package
+```
+
+- **输出**：`work/out/<小米版本>-<芯片序列号>/`：
+  - 共用的 boot、init_boot、dtbo、vendor_boot、vbmeta；
+  - `super_nofind.img` + `vbmeta_system_nofind.img`：开机向导用，不带"查找设备"；
+  - `super_find.img` + `vbmeta_system_find.img`：向导完成后写入；
+  - `manifest.json`。
+- **super**：用 `tools/make_super.py` 生成，大小取设备 GPT 里 super 的长度。只放当前槽的 7 个逻辑分区，另一个槽留空。只写到内容结束为止（约 10.7 GB，super 分区是 19 GB）。生成后读回，每个分区的字节都要和来源镜像一致。
+- **一致性检查**：两份启动链除了 product 和 vbmeta_system，其余必须逐字节相同。为此构建是可重复的：hashtree 的 salt 由分区名和芯片序列号算出，EROFS 的 UUID 由版本和分区名算出，打包时间固定。
+- **manifest.json**：
+  - 每个文件的 sha256；
+  - 输入：小米版本和指纹、联想来源和指纹；
+  - 绑定的设备：芯片序列号、HWID、OEM 公钥哈希、槽、回滚索引、super 大小；
+  - 刷入计划 `plan`：第一次写哪些、向导后写哪些、哪些分区永远不写。
+- **实测**：CN 414 + yupei OS4.0.5.0，完整流程（两份框架侧、两份启动链、打包）13 分钟。
+
 ## 9008（EDL）
 
 - 进入：`adb reboot edl`（需 root 或在 Android 下），或者拔线 → 长按电源 15–20 s 关机 → 按住音量+和音量−插线。
