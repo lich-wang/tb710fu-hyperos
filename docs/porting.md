@@ -13,7 +13,7 @@
    - VINTF：原厂 vendor 的 target-level 是 8，它的 29 个 `android.*` HAL 版本都在框架 FCM 8 的允许范围内；
    - SELinux：原厂 vendor 的策略和 yupei 框架的策略直接编译通过，**不需要** `hyperos/sepolicy_compat.cil`；
    - VNDK：vendor API 是 34，SELinux 版本 34.0；yupei 框架带有 `com.android.vndk.v34.apex` 和 `mapping/34.0.cil`；
-   - `vendor/etc/media_profiles*.xml` 都在，所以不用再注掉 `media.settings.xml`。
+   - 例外：小米 system 的 `media.settings.xml=/vendor/etc/media_profiles_vendor.xml` 指向的文件，联想原厂 vendor 里没有（只有 `media_profiles.xml` 等），zygote 会因此 abort，所以这一行仍然要注掉（#7）。
 2. **移植包的 vendor 就是联想原厂 vendor**，底子是 1.5.04.428：
    - 3645 个文件里有 3566 个和 414 原厂逐字节相同，原厂的文件一个没少；
    - 改动只有几十个文件（见下面"差异清单"）。
@@ -34,7 +34,7 @@
 | SELinux：原厂 vendor + yupei 框架 | **编译通过**（不加补丁） | `sepolicy_compile.sh len_` |
 | SELinux：移植包 vendor + yupei 框架 | 不加补丁失败（`vendor_sepolicy.cil:18860`），加 `sepolicy_compat.cil` 才通过，和平板现状一致，可以作为对照 | `sepolicy_compile.sh port_ …` |
 | VNDK v34 | yupei `system_ext/apex/com.android.vndk.v34.apex` | — |
-| media_profiles | 原厂有 `media_profiles.xml`、`media_profiles_pineapple.xml` 等 | — |
+| media_profiles | 原厂有 `media_profiles.xml`、`media_profiles_pineapple.xml` 等，但**没有** system 指定的 `media_profiles_vendor.xml` | — |
 
 Ubuntu 的 secilc 3.9 不认识 Android 17 新加的 `(policycap functionfs_seclabel)`，编译前要先去掉这一行，脚本里已经处理了。
 
@@ -109,6 +109,20 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
   - odm、vendor_dlkm、system_dlkm 原样；四个镜像都去掉了 AVB footer，由构建重签；
   - 用 CN 414 实测：3820 个条目里只有 fstab 不同，`e2fsck -fn` 干净，vendor 从 1.8 GB 变成 2.0 GB（拆开共用块后多出约 250 MB）；
   - 第一版不加小米 HAL。
-- **#7（框架侧）**：去掉 `sepolicy_compat.cil` 和 `media.settings.xml` 的改动；lwky 只保留 `/proc` 那几段；小米机型身份放在 product。
+- **#7（框架侧）✅**：`tb710fu.py framework [--no-finddevice] [--debug]`，用 erofs-utils 解包再重新打包（每个文件的 uid、gid、mode 和 SELinux 标签都取自小米原镜像，新加的文件指定从哪个文件取）。
+  - **system**：
+    - `build.prop` 注掉 `media.settings.xml`（联想 vendor 没有 `media_profiles_vendor.xml`，zygote 会 abort）；
+    - 加 Lenovo Tab Pen Plus 按键映射；
+    - 加 `etc/init/tb710fu.rc`：手写笔、双击唤醒、高触控采样率接到联想触摸驱动的 `/proc` 节点，lwky 的其余部分都不要；
+    - `product/pangu/system` 和 mi_ext 的系统权限文件移进来。小米 vendor 开机时会把它们叠上去，联想 vendor 不会；com.tms.* NFC jar 不带。
+  - **system_ext**：不改，直接复制。
+  - **product**：
+    - mi_ext/product 合并进来，原因同上；
+    - `build.prop`：`pagesize.max=4096`（联想内核是 4K 页），去掉 `lcd_density`，并入 mi_ext 的属性，`.DEV`（小米账号需要，`--no-finddevice` 时不加）、手写笔、skiagl；
+    - 机型身份：联想 odm 会把机型报成 `TB710FU`（system 的属性顺序是 odm 优先），小米框架就找不到 `device_features/TB710FU.xml`。所以把 `ro.product.property_source_order` 改成 product 优先，并写入 yupei odm 的身份（Xiaomi / yupei / 25097RP43C）。联想 odm 的 `*_for_attestation` 不动，要和设备出厂写入的身份一致；
+    - 两个 NCM overlay 在 `work/overlay/` 下有就带上。
+  - 不再需要 `sepolicy_compat.cil`、移植包的 PearlBiometric 人脸，以及 lwky 的分辨率、窗口规则、智能充电、机型伪装。
+  - OS4.0.5.0 实测（3 分 36 秒）：和小米原镜像逐项比对，system 只有 `build.prop` 内容变了、新增 10 个条目；product 只有 `etc/build.prop` 变了，删掉 pangu（24 个条目）、新增 mi_ext 的 139 个条目。所有共有路径的元数据都不变，新增条目都有指定的元数据。
+  - 待真机：人脸解锁（yupei 声明的是 TEE 人脸，这里没有）、`device_features/yupei.xml` 里的 144Hz 等参数和这块屏是否相符。
 - **#8（启动链）**：vendor_boot 的第一阶段 fstab 加 erofs；保留 `avb=`，按设备的回滚索引重签。
 - **#11（真机）**：逐项确认色彩风格、充电、手写笔、皮套、相机/视频、小米账号等功能；缺哪个 HAL 再按上面的办法从 yupei 加，并给它写最小 SELinux 策略。
