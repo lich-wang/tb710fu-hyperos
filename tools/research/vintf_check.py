@@ -68,7 +68,9 @@ def entries(paths):
                 for v in vers:
                     new.append((fmt, name, v, None, None))
             if h.get('override') == 'true':
-                majors = {e[2].split('.')[0] for e in new if e[2]}
+                # majors from the explicit <version> elements and from the instances' own versions
+                majors = {v.split('.')[0] for v in (x.text.strip() for x in h.findall('version')) if v}
+                majors |= {e[2].split('.')[0] for e in new if e[2]}
                 out = [e for e in out if not (e[0] == fmt and e[1] == name and
                                               (fmt == 'aidl' or not majors or e[2].split('.')[0] in majors))]
             out += new
