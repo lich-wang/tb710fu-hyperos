@@ -47,8 +47,12 @@ def plan(src):
             continue
         if n in SKIP:
             skipped.append((n, p['bytes'], '用户数据'))
+        elif GPT_NAME.match(n):
+            raise SourceError(f'有一个分区叫 {n}，和 GPT 备份文件同名，不备份（换个目录也一样，需要改工具）')
         elif not ITEM_NAME.match(f'{n}.bin'):
             skipped.append((n, p['bytes'], '分区名不能当文件名'))
+        elif ',' in n:
+            skipped.append((n, p['bytes'], '分区名带逗号（edl 会把它拆成两个名字）'))
         elif p['bytes'] >= BIG and n != 'super':
             skipped.append((n, p['bytes'], '超过 4 GiB，不是安卓系统分区'))
         else:
@@ -86,6 +90,7 @@ def find_resumable(src):
 
 # A file name run() may write: <partition>.bin / gpt_*.bin. Any GPT name is allowed except path separators, NUL
 # and a leading dot, so generation (plan) and validation (backup.json read back) use the same rule.
+GPT_NAME = re.compile(r'^gpt_(main|backup)\d+$')    # gpt_main<L>.bin / gpt_backup<L>.bin are reserved for the GPT
 ITEM_NAME = re.compile(r'^[^/\\\0.][^/\\\0]*\.bin$')
 
 
@@ -181,6 +186,7 @@ def run(src, dest=None, ident=None, resume=True):
         if not same_device(st, src):    # only reachable with an explicit --out
             print('  ⚠ 这次没读到芯片序列号，核对不了是不是同一台平板；你指定了这个目录，按同一台处理')
         print('  核对已经读好的文件 …', flush=True)
+        st['skipped'] = [{'name': n, 'bytes': b, 'reason': r} for n, b, r in skipped]
         bad = verify_items(dest, st['items'], remove_bad=True)
         for name in bad:
             print(f'  {name} 丢失或和记录不符，重新读')
