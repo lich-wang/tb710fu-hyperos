@@ -56,10 +56,13 @@ def usb_mode():
     """'9008', '900e', None, or 'unknown' when it cannot be detected (edl is the real check)."""
     try:
         if platform.system() == 'Darwin':
-            t = subprocess.run(['system_profiler', 'SPUSBDataType'], capture_output=True, text=True, timeout=30).stdout
-            for pid in ('9008', '900e'):
-                if re.search(rf'Product ID: 0x{pid}\b[\s\S]{{0,200}}?Vendor ID: 0x05c6', t, re.I):
-                    return pid
+            # ioreg works on every macOS version (system_profiler's USB data type was renamed in newer releases)
+            t = subprocess.run(['ioreg', '-p', 'IOUSB', '-l', '-w0'], capture_output=True, text=True, timeout=30).stdout
+            for dev in re.split(r'\+-o ', t):
+                v = re.search(r'"idVendor" = (\d+)', dev)
+                p = re.search(r'"idProduct" = (\d+)', dev)
+                if v and p and int(v.group(1)) == 0x05c6 and int(p.group(1)) in (0x9008, 0x900e):
+                    return '%04x' % int(p.group(1))
             return None
         if platform.system() == 'Linux':
             for d in glob.glob('/sys/bus/usb/devices/*'):
@@ -96,7 +99,9 @@ class EdlSource:
         self.props = {}
 
     def edl(self, *args, ok=None):
-        cmd = [edl_bin(), *map(str, args), f'--loader={self.loader}', '--memory=ufs']
+        cmd = [edl_bin(), *map(str, args), f'--loader={self.loader}']
+        if args[0] != 'reset':          # edl's reset command does not accept --memory
+            cmd.append('--memory=ufs')
         try:
             p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace',
                                timeout=1800)
