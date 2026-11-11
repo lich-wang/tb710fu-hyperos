@@ -88,17 +88,19 @@ def parse_lp(head, slot_index=0):
     tables = head[off + hsize:off + hsize + tsize]
     if len(tables) < tsize:
         raise ValueError('super metadata 读取不完整')
-    try:
-        extents = [struct.unpack_from('<QIQI', tables, ex_off + i * ex_sz) for i in range(ex_n)]
-        out = {}
-        for i in range(pt_n):
-            e = tables[pt_off + i * pt_sz:pt_off + (i + 1) * pt_sz]
-            name = e[:36].rstrip(b'\0').decode(errors='replace')
-            _, first, n_ext, _ = struct.unpack_from('<IIII', e, 36)
-            out[name] = [(tdata * 512, nsec * 512) for nsec, ttype, tdata, _ in extents[first:first + n_ext]
-                         if ttype == 0]
-    except struct.error:
-        raise ValueError('super metadata 损坏')
+    # table descriptors: entries must fit the tables blob and be at least as large as the fields read
+    if pt_sz < 52 or ex_sz < 24 or pt_off + pt_n * pt_sz > tsize or ex_off + ex_n * ex_sz > tsize:
+        raise ValueError('super metadata 损坏（分区表或 extent 表越界）')
+    extents = [struct.unpack_from('<QIQI', tables, ex_off + i * ex_sz) for i in range(ex_n)]
+    out = {}
+    for i in range(pt_n):
+        e = tables[pt_off + i * pt_sz:pt_off + (i + 1) * pt_sz]
+        name = e[:36].rstrip(b'\0').decode(errors='replace')
+        _, first, n_ext, _ = struct.unpack_from('<IIII', e, 36)
+        if first + n_ext > ex_n:
+            raise ValueError(f'super metadata 损坏（{name} 引用的 extent {first}+{n_ext} 超出 {ex_n} 个）')
+        out[name] = [(tdata * 512, nsec * 512) for nsec, ttype, tdata, _ in extents[first:first + n_ext]
+                     if ttype == 0]
     return out
 
 

@@ -75,7 +75,7 @@ def check_chain(src, slot, prof):
         prof['vbmeta'][c['partition']] = cv
         prof['rollback'][str(c['rollback_location'])] = cv['rollback']
         if not (cv['key'] and c['key']):
-            prof['warnings'].append(f'{name} 的链式公钥核对不了（缺少公钥）')
+            prof['errors'].append(f'{name} 的链式公钥核对不了（{"vbmeta 链式描述" if not c["key"] else name}里缺少公钥）')
         elif not cv['key_matches_chain']:
             prof['errors'].append(f'{name} 的签名公钥和 vbmeta 链式描述里的不一致（按 AVB 规则这样启动不了）')
 
@@ -265,7 +265,7 @@ def report(prof):
         print(f'ABL 内置 AVB 根公钥：RSA{k["bits"]}  {avb.key_str(k)}')
     vb = prof.get('vbmeta') or {}
     for part, v in vb.items():
-        print(f'{part:14s} 签名 {avb.key_str(v["key"])}  回滚索引 {v["rollback"]}')
+        print(f'{part:14s} 内嵌公钥 {avb.key_str(v["key"])}（签名本身未验证）  回滚索引 {v["rollback"]}')
     if prof.get('rollback'):
         print('回滚位置：' + '  '.join(f'{k}={v}' for k, v in sorted(prof['rollback'].items())))
     sup = prof.get('super')
@@ -376,7 +376,7 @@ def check_files(paths):
         except ValueError as e:
             print(f'  ⚠ {e}')
             continue
-        print(f'  签名 {v["alg"]}  公钥 {avb.key_str(v["key"])}')
+        print(f'  算法 {v["alg"]}  内嵌公钥 {avb.key_str(v["key"])}（签名本身未验证）')
         print(f'  回滚索引 {v["rollback"]}（位置 {v["rollback_location"]}）  flags {v["flags"]}  {v["release"]}')
         for c in v['chains']:
             print(f'  链 → {c["partition"]}：{avb.key_str(c["key"])}，回滚位置 {c["rollback_location"]}')

@@ -156,14 +156,17 @@ def find_vbmeta(data):
     return None
 
 
-def _span(vb, off, size, what):
-    if off < 0 or size < 0 or off + size > len(vb):
+def _span(vb, off, size, what, limit=None):
+    limit = len(vb) if limit is None else min(limit, len(vb))
+    if off < 0 or size < 0 or off + size > limit:
         raise ValueError(f'vbmeta 损坏或读取不完整（{what} 越界）')
     return vb[off:off + size]
 
 
 def parse_vbmeta(vb):
-    """-> dict: alg, key, rollback, rollback_location, flags, release, chains, hashed. ValueError if malformed."""
+    """-> dict: alg, key, rollback, rollback_location, flags, release, chains, hashed. ValueError if malformed.
+
+    Only the embedded public key is read: the signature itself is NOT verified ('signature_verified': False)."""
     if vb[:4] != b'AVB0':
         raise ValueError('不是 vbmeta（没有 AVB0）')
     if len(vb) < 256:
@@ -176,7 +179,8 @@ def parse_vbmeta(vb):
         raise ValueError('vbmeta 损坏（公钥或描述符超出辅助块）')
     r = {'alg': ALGS.get(alg, str(alg)), 'key': key_info(_span(vb, a + pk_off, pk_size, '公钥')),
          'rollback': rollback, 'rollback_location': rb_loc, 'flags': flags,
-         'release': release.split(b'\0')[0].decode(errors='replace'), 'chains': [], 'hashed': []}
+         'release': release.split(b'\0')[0].decode(errors='replace'), 'chains': [], 'hashed': [],
+         'signature_verified': False}
     d, end = a + d_off, a + d_off + d_size
     try:
         while d + 16 <= end:
@@ -184,19 +188,21 @@ def parse_vbmeta(vb):
             body = d + 16
             if body + nbf > end:
                 raise ValueError('vbmeta 损坏（描述符越界）')
+            lim = body + nbf    # every field must stay inside this descriptor
             if tag == 4:    # chain partition
-                loc, nlen, klen, _ = struct.unpack_from('>LLLL', vb, body)
+                loc, nlen, klen, _ = struct.unpack_from('>LLLL', _span(vb, body, 16, '链式描述符', lim))
                 p = body + 16 + 60
-                r['chains'].append({'partition': _span(vb, p, nlen, '链式分区名').decode(errors='replace'),
-                                    'rollback_location': loc, 'key': key_info(_span(vb, p + nlen, klen, '链式公钥'))})
+                r['chains'].append({'partition': _span(vb, p, nlen, '链式分区名', lim).decode(errors='replace'),
+                                    'rollback_location': loc,
+                                    'key': key_info(_span(vb, p + nlen, klen, '链式公钥', lim))})
             elif tag == 2:  # hash
                 q = body + 8 + 32
-                nlen = struct.unpack_from('>L', vb, q)[0]
-                r['hashed'].append(_span(vb, q + 16 + 60, nlen, '分区名').decode(errors='replace'))
+                nlen = struct.unpack('>L', _span(vb, q, 4, 'hash 描述符', lim))[0]
+                r['hashed'].append(_span(vb, q + 16 + 60, nlen, '分区名', lim).decode(errors='replace'))
             elif tag == 1:  # hashtree
                 q = body + 4 + 8 * 3 + 4 * 3 + 8 * 2 + 32
-                nlen = struct.unpack_from('>L', vb, q)[0]
-                r['hashed'].append(_span(vb, q + 16 + 60, nlen, '分区名').decode(errors='replace'))
+                nlen = struct.unpack('>L', _span(vb, q, 4, 'hashtree 描述符', lim))[0]
+                r['hashed'].append(_span(vb, q + 16 + 60, nlen, '分区名', lim).decode(errors='replace'))
             d = body + nbf
     except struct.error:
         raise ValueError('vbmeta 损坏（描述符不完整）')
