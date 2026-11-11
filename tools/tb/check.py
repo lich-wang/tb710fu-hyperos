@@ -64,11 +64,11 @@ def check_chain(src, slot, prof):
     for c in v['chains']:
         name = c['partition'] if c.get('no_ab') else c['partition'] + slot
         if name not in src.parts:
-            prof['warnings'].append(f'vbmeta 链到 {c["partition"]}，但设备上没有 {name}')
+            prof['errors'].append(f'vbmeta 链到 {c["partition"]}，但设备上没有 {name}（链式公钥和回滚索引核对不了）')
             continue
         blob = partition_vbmeta(src, name)
         if blob is None:
-            prof['warnings'].append(f'{name} 没有 AVB 签名（vbmeta 要求它链式校验）')
+            prof['errors'].append(f'{name} 没有 AVB 签名（vbmeta 要求它链式校验）')
             continue
         cv = avb.parse_vbmeta(blob)
         cv['key_matches_chain'] = bool(cv['key'] and c['key'] and cv['key']['sha1'] == c['key']['sha1'])
