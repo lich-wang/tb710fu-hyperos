@@ -17,25 +17,43 @@ from .sources import WORK, SourceError
 
 BOOT_CHAIN = ('boot', 'init_boot', 'vendor_boot', 'dtbo', 'recovery', 'vbmeta', 'vbmeta_system')
 PROP = re.compile(rb'(ro\.[\w.]*(?:build\.fingerprint|build\.display\.id|build\.version\.incremental|'
-                  rb'build\.version\.release|zui[\w.]*|lenovo[\w.]*))=([\x20-\x7e]{1,200})')
+                  rb'build\.version\.release|product\.[\w.]*(?:brand|manufacturer)|zui[\w.]*|lenovo[\w.]*))=([\x20-\x7e]{1,200})')
 
 
 # ---------------------------------------------------------------- shared
 
+FINGERPRINT = re.compile(r'^[^/\s]+/[^/\s]+/[^/\s:]+:[^/\s]+/')    # brand/product/device:release/...
+
+
 def scan_props(path):
-    """Build properties found as plain text in an image (works for ext4, and for uncompressed EROFS files)."""
+    """Build properties found as plain text in an image (works for ext4, and for uncompressed EROFS files).
+
+    {key: [values]}: a key can appear more than once (build.prop, but also templates such as "...fingerprint=*").
+    """
     found = {}
     with open(path, 'rb') as f:
         prev = b''
         for b in iter(lambda: f.read(64 << 20), b''):
             for k, v in PROP.findall(prev[-512:] + b):
-                found.setdefault(k.decode(), v.decode().strip())
+                vals = found.setdefault(k.decode(), [])
+                v = v.decode().strip()
+                if v not in vals and len(vals) < 8:
+                    vals.append(v)
             prev = b
     return found
 
 
+def fingerprints(props):
+    return [v for k, vs in props.items() if k.endswith('fingerprint') for v in vs if FINGERPRINT.match(v)]
+
+
 def is_lenovo(props):
-    return any(v.lower().startswith('lenovo/') for k, v in props.items() if k.endswith('fingerprint'))
+    """A Lenovo/ fingerprint; without any real fingerprint, a vendor brand/manufacturer of Lenovo."""
+    fps = fingerprints(props)
+    if fps:
+        return any(v.lower().startswith('lenovo/') for v in fps)
+    return any(v.lower() == 'lenovo' for k, vs in props.items() if k.startswith('ro.product.vendor.')
+               and k.endswith(('brand', 'manufacturer')) for v in vs)
 
 
 def extract_super(super_path, slot, out):
@@ -151,9 +169,13 @@ class Package:
             exe = shutil.which('7zz') or shutil.which('7z')
             if not exe:
                 raise SourceError('需要 7zz 或 7z 才能读 .7z（或者先解压，再传文件夹）')
+            os.makedirs(WORK, exist_ok=True)
             self.tmp = tempfile.mkdtemp(prefix='lenovo-pkg-', dir=WORK)
-            print(f'  解压 {path}（几 GB，要等几分钟）…', flush=True)
-            subprocess.run([exe, 'x', '-y', f'-o{self.tmp}', path], check=True, stdout=subprocess.DEVNULL)
+            print(f'  解压 {path}（十几 GB，要等几分钟）…', flush=True)
+            # everything pull needs is in the images folder; leave out what it never reads (user data, tools)
+            skip = ['userdata_*', 'metadata*.img', 'persist.img', 'Driver.tar.gz', '*.exe', '*.dll', '*.hex', '*.HEX']
+            subprocess.run([exe, 'x', '-y', f'-o{self.tmp}', path] + [f'-xr!{x}' for x in skip], check=True,
+                           stdout=subprocess.DEVNULL)
             self.root = self.tmp
         else:
             raise SourceError(f'{path}: 要一个文件夹、.zip 或 .7z')
@@ -178,14 +200,25 @@ class Package:
 
 
 def rawprogram(pkg):
-    """<program> entries of every rawprogram*.xml: [{label, filename, start, sectors, sector_size, lun, sparse}]"""
-    out = []
-    for n in pkg.names:
+    """<program> entries of every rawprogram*.xml: [{label, filename, start, sectors, sector_size, lun, sparse}]
+
+    Some packages ship the files as *.x (truncated extension), and several rawprogram files (e.g. *_unsparse0.xml and
+    *_unsparse0-half.xml) repeat the same entries: duplicates are dropped.
+    """
+    out, seen = [], set()
+    for n in sorted(pkg.names):
         b = os.path.basename(n).lower()
-        if not (b.startswith('rawprogram') and b.endswith('.xml')):
+        if not (b.startswith('rawprogram') and (b.endswith('.xml') or b.endswith('.x'))):
             continue
         with pkg.open(n) as f:
-            root = ET.fromstring(f.read())
+            raw = f.read()
+        try:
+            root = ET.fromstring(raw)
+        except ET.ParseError:
+            if not raw.lstrip()[:1] == b'<':
+                raise SourceError(f'{os.path.basename(n)} 是加密的（联想海外包的 .x 文件只有联想的刷机工具能解开），'
+                                  '没法知道 super 各段的位置。换一个 rawprogram 是明文 xml 的包（例如国行包）。')
+            raise
         for e in root.iter('program'):
             a = e.attrib
             if not a.get('filename'):
@@ -194,6 +227,10 @@ def rawprogram(pkg):
                 start = int(a.get('start_sector', ''))
             except ValueError:
                 continue                       # e.g. "NUM_DISK_SECTORS-5." (backup GPT)
+            key = (a.get('label', ''), a['filename'], start, a.get('physical_partition_number', '0'))
+            if key in seen:
+                continue
+            seen.add(key)
             out.append({'label': a.get('label', ''), 'filename': a['filename'], 'start': start,
                         'sectors': int(a.get('num_partition_sectors', '0') or 0),
                         'sector_size': int(a.get('SECTOR_SIZE_IN_BYTES', '4096')),
@@ -234,6 +271,8 @@ def build_super(pkg, prog, dest):
                     out.seek(off)
                     shutil.copyfileobj(f, out, 1 << 22)
                     n = out.tell() - off
+            if pkg.tmp:                        # our own temporary extraction: free the space as we go
+                os.remove(os.path.join(pkg.root, name))
             size = max(size, off + n)
         out.truncate(size)
 
@@ -314,7 +353,8 @@ def from_package(path, profile=None):
 def report(out, info):
     print('\n==== 取件结果 ====')
     for base, p in info.get('partitions', {}).items():
-        fp = next((v for k, v in p['props'].items() if k.endswith('fingerprint')), '（没找到指纹）')
+        fps = fingerprints(p['props'])
+        fp = next((v for v in fps if v.lower().startswith('lenovo/')), fps[0] if fps else '（没找到指纹）')
         print(f'{base:12} {p["fs"] or "?":6} {fp}')
     for base, a in info.get('avb', {}).items():
         print(f'{base:12} 签名 {a["key"]}' + (f'  回滚索引 {a["rollback"]}' if a['rollback'] else ''))
