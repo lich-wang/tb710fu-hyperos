@@ -6,7 +6,7 @@ Output: work/xiaomi/<version>/
   xiaomi.json   OTA metadata, sha256 of every image, filesystems
 Standard library only (ZSTD operations, if any, need the `zstd` command). Nothing touches the device.
 """
-import base64, bz2, concurrent.futures, hashlib, json, lzma, os, re, shutil, struct, subprocess, threading, time, zipfile
+import base64, bz2, concurrent.futures, hashlib, json, lzma, os, re, shutil, struct, subprocess, tempfile, threading, time, zipfile
 
 from . import layout
 from .backup import file_sha256
@@ -215,8 +215,34 @@ def import_ota(path, force=False):
     missing = [n for n in WANT if n not in pay.parts]
     if missing:
         raise SourceError(f'payload 里没有 {missing}')
-    out = os.path.join(WORK, 'xiaomi', version or 'unknown')
-    os.makedirs(out, exist_ok=True)
+    # version can come from inside the zip: one plain directory name below work/xiaomi, --force or not
+    name = version or 'unknown'
+    if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._-]{0,63}', name):
+        raise SourceError(f'版本号 {name!r} 不能当目录名，拒绝导入')
+    root = os.path.join(WORK, 'xiaomi')
+    out = os.path.join(root, name)
+    if os.path.dirname(os.path.abspath(out)) != os.path.abspath(root):
+        raise SourceError(f'输出目录 {out} 不在 {root} 里，拒绝导入')
+    os.makedirs(root, exist_ok=True)
+    # extract into a temporary folder and swap it in at the end: a failed import never damages a previous one
+    tmp = tempfile.mkdtemp(prefix=f'.{name}-', dir=root)
+    try:
+        info = _extract_all(path, pay, meta, version, post, tmp)
+        old = out + '.old'
+        if os.path.exists(out):
+            shutil.rmtree(old, ignore_errors=True)
+            os.rename(out, old)
+        os.rename(tmp, out)
+        shutil.rmtree(old, ignore_errors=True)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if not os.path.exists(out) and os.path.exists(out + '.old'):
+            os.rename(out + '.old', out)              # put the previous import back
+        raise
+    return out, info
+
+
+def _extract_all(path, pay, meta, version, post, out):
     info = {'source': os.path.abspath(path), 'zip_bytes': os.path.getsize(path), 'metadata': meta,
             'version': version, 'verified': post in VERIFIED, 'partitions': {}}
     t0 = time.time()
@@ -232,7 +258,7 @@ def import_ota(path, force=False):
     with open(os.path.join(out, 'xiaomi.json'), 'w') as f:
         json.dump(info, f, ensure_ascii=False, indent=1)
     print(f'  用时 {(time.time() - t0) / 60:.1f} 分钟')
-    return out, info
+    return info
 
 
 def report(out, info):

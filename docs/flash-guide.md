@@ -45,7 +45,7 @@ yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包（Android 17，9922261403 字节；文
 新流程导入这个包（只用 Python 标准库，不需要 payload-dumper-go）：
 
 ```bash
-python3 tools/tb710fu.py import yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip
+python3 tools/tb710fu.py import work/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip
 ```
 
 - **校验**：
