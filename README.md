@@ -48,7 +48,7 @@ ABL（未解锁，信任 AOSP testkey）
 
 ```
 tools/          build_package.py（构建完整 9008 刷机包）、flash_package.py（备份 / 刷入 / 读回校验）、package/（两者共用的常量与已验证哈希）、
-                tb710fu.py + tb/（新流程入口，见 #1；目前有 `check` 只读检查是否信任 AOSP 测试密钥、`backup` 9008 完整备份、`pull` 取出联想原厂组件、`import` 导入小米平板 8 官方包、`vendor` 构建 vendor 侧）、
+                tb710fu.py + tb/（新流程入口，见 #1；目前有 `check` 只读检查是否信任 AOSP 测试密钥、`backup` 9008 完整备份、`pull` 取出联想原厂组件、`import` 导入小米平板 8 官方包、`vendor` 构建 vendor 侧、`framework` 构建框架侧）、
                 make_v3_bootchain.py（v3 启动链）、build_os4.py（HyperOS 4 分区构建）、make_super.py、lp_unpack.py、
                 erofs_meta.py、sepolicy_fix.py、flash_super.sh、mac/displaymode.swift
 hyperos/        笔按键映射、SELinux 兼容策略、RRO overlay 源码、Magisk 模块

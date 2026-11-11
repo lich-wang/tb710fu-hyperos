@@ -9,6 +9,7 @@
   tb710fu.py pull --package ZIP|7Z|DIR  ... or from an official Lenovo 9008 package
   tb710fu.py import OTA.zip            Xiaomi Pad 8 (yupei) parts from the official Xiaomi full OTA package
   tb710fu.py vendor                    vendor side of the new super from the Lenovo stock parts (docs/porting.md)
+  tb710fu.py framework                 system, system_ext, product from the imported Xiaomi images (docs/porting.md)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
 device profile (work/device/latest.json: slot, rollback indexes, super layout, firmware fingerprint) that
@@ -21,7 +22,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, check, lenovo, sources, vendor, xiaomi  # noqa: E402
+from tb import backup, check, framework, lenovo, sources, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -126,6 +127,14 @@ def cmd_vendor(a):
     return 0 if vendor.report(out, res) else 1
 
 
+def cmd_framework(a):
+    try:
+        out, res = framework.build(a.xiaomi, keep_finddevice=not a.no_finddevice, debug=a.debug)
+    except sources.SourceError as e:
+        sys.exit(f'\n{e}')
+    return 0 if framework.report(out, res) else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -152,9 +161,14 @@ def main():
     i.add_argument('--force', action='store_true', help='允许没验证过的版本')
     v = sub.add_parser('vendor', help='用联想原厂组件构建 vendor 侧（vendor 改 fstab，odm/dlkm 原样）')
     v.add_argument('--lenovo', help='pull 的输出目录（默认最新的）')
+    f = sub.add_parser('framework', help='用小米官方组件构建 system / system_ext / product')
+    f.add_argument('--xiaomi', help='import 的输出目录（默认最新的）')
+    f.add_argument('--no-finddevice', action='store_true',
+                   help='去掉"查找设备"：清数据后第一次开机向导用（否则激活检查过不去）')
+    f.add_argument('--debug', action='store_true', help='调试版：开机就有免授权 adb')
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
-            'vendor': cmd_vendor}[a.cmd](a)
+            'vendor': cmd_vendor, 'framework': cmd_framework}[a.cmd](a)
 
 
 if __name__ == '__main__':
