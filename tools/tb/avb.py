@@ -73,14 +73,39 @@ def lzma_streams(data, depth=0):
     return out
 
 
+def elf_extent(data):
+    """End of the last ELF segment (ELF32/64, little endian): bytes after it are not part of ABL."""
+    try:
+        if data[4] == 2:    # ELFCLASS64: p_offset at +8, p_filesz at +32
+            phoff, = struct.unpack_from('<Q', data, 0x20)
+            phentsize, phnum = struct.unpack_from('<HH', data, 0x36)
+            fmt, o_off, o_size = '<Q', 8, 32
+        else:               # ELFCLASS32: p_offset at +4, p_filesz at +16
+            phoff, = struct.unpack_from('<I', data, 0x1c)
+            phentsize, phnum = struct.unpack_from('<HH', data, 0x2a)
+            fmt, o_off, o_size = '<I', 4, 16
+        ends = []
+        for i in range(phnum):
+            h = phoff + i * phentsize
+            off, size = struct.unpack_from(fmt, data, h + o_off)[0], struct.unpack_from(fmt, data, h + o_size)[0]
+            if size:
+                ends.append(off + size)
+    except (struct.error, IndexError):
+        return len(data)
+    return min(max(ends), len(data)) if ends else len(data)
+
+
 def check_abl(data):
     """Root keys compiled into ABL's LinuxLoader (the key a locked bootloader accepts for vbmeta).
 
+    Only the bytes inside the ELF's segments are searched. Trusted = every AVB key found is an AOSP test key;
+    not trusted = none is; both kinds present -> None (cannot tell which one LinuxLoader verifies with).
     -> {'keys': [{'bits', 'sha1', 'name'}], 'trusts_testkey': bool|None, 'signer': [...], 'error': str|None}"""
     res = {'keys': [], 'trusts_testkey': None, 'signer': [], 'error': None}
     if data[:4] != b'\x7fELF':
         res['error'] = '不是 ELF 文件（abl 应该是 ELF）'
         return res
+    data = data[:elf_extent(data)]
     res['signer'] = sorted(set(s.decode().strip() for s in re.findall(
         rb'[\x20-\x7e]{6,}(?= *(?:Root CA|Attestation CA)\d?)', data)))
     seen = set()
@@ -90,10 +115,15 @@ def check_abl(data):
             if k['sha1'] not in seen:
                 seen.add(k['sha1'])
                 res['keys'].append(dict(k, bits=bits))
-    if res['keys']:
-        res['trusts_testkey'] = any(k['name'] for k in res['keys'])
-    else:
+    named = [bool(k['name']) for k in res['keys']]
+    if not named:
         res['error'] = '没在 abl 里找到 AVB 公钥（格式不认识，或 abl 读取不完整）'
+    elif all(named):
+        res['trusts_testkey'] = True
+    elif not any(named):
+        res['trusts_testkey'] = False
+    else:
+        res['error'] = 'abl 里同时有 AOSP 测试公钥和其他公钥，认不出 LinuxLoader 用哪个校验 vbmeta'
     return res
 
 
@@ -126,36 +156,50 @@ def find_vbmeta(data):
     return None
 
 
+def _span(vb, off, size, what):
+    if off < 0 or size < 0 or off + size > len(vb):
+        raise ValueError(f'vbmeta 损坏或读取不完整（{what} 越界）')
+    return vb[off:off + size]
+
+
 def parse_vbmeta(vb):
-    """-> dict: alg, key, rollback, rollback_location, flags, release, chains, hashed."""
+    """-> dict: alg, key, rollback, rollback_location, flags, release, chains, hashed. ValueError if malformed."""
     if vb[:4] != b'AVB0':
         raise ValueError('不是 vbmeta（没有 AVB0）')
+    if len(vb) < 256:
+        raise ValueError('vbmeta 头不完整（不足 256 字节）')
     (_, _, _, auth, aux, alg, _, _, _, _, pk_off, pk_size, _, _, d_off, d_size,
      rollback, flags, rb_loc, release) = struct.unpack('>4sLLQQLQQQQQQQQQQQLL47sx80x', vb[:256])
     a = 256 + auth
-    r = {'alg': ALGS.get(alg, str(alg)), 'key': key_info(vb[a + pk_off:a + pk_off + pk_size]),
+    _span(vb, a, aux, '辅助块')
+    if pk_off + pk_size > aux or d_off + d_size > aux:
+        raise ValueError('vbmeta 损坏（公钥或描述符超出辅助块）')
+    r = {'alg': ALGS.get(alg, str(alg)), 'key': key_info(_span(vb, a + pk_off, pk_size, '公钥')),
          'rollback': rollback, 'rollback_location': rb_loc, 'flags': flags,
          'release': release.split(b'\0')[0].decode(errors='replace'), 'chains': [], 'hashed': []}
     d, end = a + d_off, a + d_off + d_size
-    while d + 16 <= end:
-        tag, nbf = struct.unpack_from('>QQ', vb, d)
-        body = d + 16
-        if tag == 4:    # chain partition
-            loc, nlen, klen, _ = struct.unpack_from('>LLLL', vb, body)
-            p = body + 16 + 60
-            r['chains'].append({'partition': vb[p:p + nlen].decode(errors='replace'), 'rollback_location': loc,
-                                'key': key_info(vb[p + nlen:p + nlen + klen])})
-        elif tag == 2:  # hash
-            q = body + 8 + 32
-            nlen = struct.unpack_from('>L', vb, q)[0]
-            p = q + 16 + 60
-            r['hashed'].append(vb[p:p + nlen].decode(errors='replace'))
-        elif tag == 1:  # hashtree
-            q = body + 4 + 8 * 3 + 4 * 3 + 8 * 2 + 32
-            nlen = struct.unpack_from('>L', vb, q)[0]
-            p = q + 16 + 60
-            r['hashed'].append(vb[p:p + nlen].decode(errors='replace'))
-        d = body + nbf
+    try:
+        while d + 16 <= end:
+            tag, nbf = struct.unpack_from('>QQ', vb, d)
+            body = d + 16
+            if body + nbf > end:
+                raise ValueError('vbmeta 损坏（描述符越界）')
+            if tag == 4:    # chain partition
+                loc, nlen, klen, _ = struct.unpack_from('>LLLL', vb, body)
+                p = body + 16 + 60
+                r['chains'].append({'partition': _span(vb, p, nlen, '链式分区名').decode(errors='replace'),
+                                    'rollback_location': loc, 'key': key_info(_span(vb, p + nlen, klen, '链式公钥'))})
+            elif tag == 2:  # hash
+                q = body + 8 + 32
+                nlen = struct.unpack_from('>L', vb, q)[0]
+                r['hashed'].append(_span(vb, q + 16 + 60, nlen, '分区名').decode(errors='replace'))
+            elif tag == 1:  # hashtree
+                q = body + 4 + 8 * 3 + 4 * 3 + 8 * 2 + 32
+                nlen = struct.unpack_from('>L', vb, q)[0]
+                r['hashed'].append(_span(vb, q + 16 + 60, nlen, '分区名').decode(errors='replace'))
+            d = body + nbf
+    except struct.error:
+        raise ValueError('vbmeta 损坏（描述符不完整）')
     return r
 
 
@@ -178,9 +222,9 @@ LEN_221035 = {
 
 def advisory_hint(model, text):
     """Guess from the build string alone (used when ABL cannot be read)."""
-    m = re.search(r'ZUI[_ ]?(\d+(?:\.\d+){2,3})', text, re.I)
-    if re.search(r'ZUXOS|_PRC\b', text, re.I) and not m:
+    if re.search(r'ZUXOS|_PRC\b', text, re.I):
         return '国行 ZUXOS 固件：联想公告不覆盖，无法按版本推断'
+    m = re.search(r'ZUI[_ ]?(\d+(?:\.\d+){2,3})', text, re.I)
     if not m:
         return '没认出 ZUI 版本号（可能已不是原厂系统），无法按版本推断'
     ver, fixed = m.group(1), LEN_221035.get(model)

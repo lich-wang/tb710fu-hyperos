@@ -25,6 +25,7 @@ def cmd_check(a):
             if not os.path.exists(p):
                 sys.exit(f'{p}: 不存在')
         return 0 if check.check_files(a.paths) else 1
+    src = None
     try:
         if a.adb:
             src = sources.AdbSource(a.serial)
@@ -35,17 +36,22 @@ def cmd_check(a):
             print(f'9008 只读检查（加载器 {loader}，日志 {log}）…', flush=True)
             src = sources.EdlSource(loader, log)
         prof = check.run_check(src, firmware=not a.no_firmware)
+        path = check.save(prof)
+        check.report(prof)
+        print(f'\n设备档案：{path}')
     except sources.SourceError as e:
-        sys.exit(f'\n{e}')
-    path = check.save(prof)
-    check.report(prof)
-    print(f'\n设备档案：{path}')
-    if src.kind == 'edl' and not a.no_reset:
-        try:
-            src.reset()
-            print('已让平板退出 9008 重启。')
-        except sources.SourceError as e:
-            print(f'复位失败（拔线长按电源键重启即可）：{e}')
+        print(f'\n{e}', file=sys.stderr)
+        prof = None
+    finally:
+        # leave 9008 even when the check failed half way, unless asked to stay
+        if src is not None and src.kind == 'edl' and not a.no_reset:
+            try:
+                src.reset()
+                print('已让平板退出 9008 重启。')
+            except sources.SourceError as e:
+                print(f'复位失败（拔线长按电源键重启即可）：{e}')
+    if prof is None:
+        return 1
     return 0 if prof['ok'] else 1
 
 

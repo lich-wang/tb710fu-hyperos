@@ -39,8 +39,10 @@ def active_slot(parts):
 def sahara_info(text):
     """HWID / PK hash / chip serial printed by edl while connecting (only on the first connect after 9008)."""
     out = {}
-    for key, rx in (('hwid', r'HW_ID\s*:\s*([0-9a-fA-F]+)'), ('pk_hash', r'OEM PKHASH\s*:\s*([0-9a-fA-F]+)'),
-                    ('chip_serial', r'Chip Serial Number\s*:\s*([0-9a-fA-F]+)')):
+    # newer edl: "HW_ID:", "OEM PKHASH:", "Chip Serial Number:"; older edl: "HWID:", "PK_HASH:", "Serial:" (0x...)
+    for key, rx in (('hwid', r'\bHW_?ID\s*:\s*(?:0x)?([0-9a-fA-F]+)'),
+                    ('pk_hash', r'(?:OEM PKHASH|\bPK_HASH)\s*:\s*(?:0x)?([0-9a-fA-F]+)'),
+                    ('chip_serial', r'(?:Chip Serial Number|\bSerial)\s*:\s*(?:0x)?([0-9a-fA-F]+)')):
         m = re.search(rx, text)
         if m:
             out[key] = m.group(1).lower()
@@ -51,29 +53,52 @@ def sahara_info(text):
 
 LP_GEOM_MAGIC, LP_HDR_MAGIC = 0x616C4467, 0x414C5030
 LP_HEAD_BYTES = 4096 * 3 + 65536 * 2   # reserved + 2 geometry copies + room for the first metadata slot
+LP_METADATA_START = 4096 * 3           # first metadata slot, after the reserved area and the two geometry copies
 
 
-def parse_lp(head):
-    """Partitions of a super image from its first LP_HEAD_BYTES -> {name: [(byte_offset, byte_len), ...]}."""
-    magic = struct.unpack_from('<I', head, 4096)[0]
-    if magic != LP_GEOM_MAGIC:
+def lp_slot_index(slot):
+    """liblp metadata slot of a boot slot: '_a' / None -> 0, '_b' -> 1."""
+    return 1 if slot == '_b' else 0
+
+
+def lp_bytes_needed(head, slot_index=0):
+    """How many bytes from the start of super hold geometry + metadata slot `slot_index`."""
+    if len(head) < 4096 * 2 or struct.unpack_from('<I', head, 4096)[0] != LP_GEOM_MAGIC:
         raise ValueError('super 开头没有 liblp geometry')
-    off = 4096 * 3
+    max_size, slot_count = struct.unpack_from('<II', head, 4096 + 40)
+    if slot_index >= slot_count:
+        raise ValueError(f'super 只有 {slot_count} 个 metadata 槽')
+    return LP_METADATA_START + (slot_index + 1) * max_size
+
+
+def parse_lp(head, slot_index=0):
+    """Partitions in metadata slot `slot_index` of a super image -> {name: [(byte_offset, byte_len), ...]}.
+
+    head = the first lp_bytes_needed(head, slot_index) bytes (LP_HEAD_BYTES is enough for slot 0)."""
+    need = lp_bytes_needed(head, slot_index)
+    max_size = struct.unpack_from('<I', head, 4096 + 40)[0]
+    off = LP_METADATA_START + slot_index * max_size
+    if len(head) < min(need, off + 128):
+        raise ValueError('super metadata 读取不完整')
     magic, _, _, hsize = struct.unpack_from('<IHHI', head, off)
     if magic != LP_HDR_MAGIC:
-        raise ValueError('super 里没有 liblp metadata header')
+        raise ValueError(f'super 的 metadata 槽 {slot_index} 里没有 liblp header')
     tsize = struct.unpack_from('<I', head, off + 44)[0]
     pt_off, pt_n, pt_sz, ex_off, ex_n, ex_sz = struct.unpack_from('<6I', head, off + 80)
     tables = head[off + hsize:off + hsize + tsize]
     if len(tables) < tsize:
         raise ValueError('super metadata 读取不完整')
-    extents = [struct.unpack_from('<QIQI', tables, ex_off + i * ex_sz) for i in range(ex_n)]
-    out = {}
-    for i in range(pt_n):
-        e = tables[pt_off + i * pt_sz:pt_off + (i + 1) * pt_sz]
-        name = e[:36].rstrip(b'\0').decode(errors='replace')
-        _, first, n_ext, _ = struct.unpack_from('<IIII', e, 36)
-        out[name] = [(tdata * 512, nsec * 512) for nsec, ttype, tdata, _ in extents[first:first + n_ext] if ttype == 0]
+    try:
+        extents = [struct.unpack_from('<QIQI', tables, ex_off + i * ex_sz) for i in range(ex_n)]
+        out = {}
+        for i in range(pt_n):
+            e = tables[pt_off + i * pt_sz:pt_off + (i + 1) * pt_sz]
+            name = e[:36].rstrip(b'\0').decode(errors='replace')
+            _, first, n_ext, _ = struct.unpack_from('<IIII', e, 36)
+            out[name] = [(tdata * 512, nsec * 512) for nsec, ttype, tdata, _ in extents[first:first + n_ext]
+                         if ttype == 0]
+    except struct.error:
+        raise ValueError('super metadata 损坏')
     return out
 
 

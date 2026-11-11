@@ -21,8 +21,7 @@ FIRMWARE = ('xbl', 'xbl_config', 'xbl_ramdump', 'shrm', 'aop', 'aop_config', 'tz
 LOGICAL = ('system', 'system_ext', 'product', 'vendor', 'odm', 'vendor_dlkm', 'system_dlkm')
 
 # Known firmware sets: image sha256 of the 9008 package that was flashed on the reference device
-TESTED_FIRMWARE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                               'package', 'tested_firmware.json')
+TESTED_FIRMWARE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tested_firmware.json')
 KNOWN_SETS = {'tested_firmware.json': 'ZUXOS 1.5.04.495（HyperOS 3.0.305 移植包 + 495 免解锁补充包，参考设备）'}
 
 
@@ -31,10 +30,12 @@ def trim_sha(data):
 
 
 def known_firmware():
+    """{partition: sha256} of the reference firmware set, or None when the list cannot be read."""
     try:
-        files = json.load(open(TESTED_FIRMWARE))['files']
+        with open(TESTED_FIRMWARE) as f:
+            files = json.load(f)['files']
     except (OSError, ValueError, KeyError):
-        return {}
+        return None
     return {os.path.splitext(k)[0]: v for k, v in files.items()}
 
 
@@ -73,8 +74,10 @@ def check_chain(src, slot, prof):
         cv['key_matches_chain'] = bool(cv['key'] and c['key'] and cv['key']['sha1'] == c['key']['sha1'])
         prof['vbmeta'][c['partition']] = cv
         prof['rollback'][str(c['rollback_location'])] = cv['rollback']
-        if not cv['key_matches_chain']:
-            prof['warnings'].append(f'{name} 的签名公钥和 vbmeta 链式描述里的不一致（现在应该启动不了）')
+        if not (cv['key'] and c['key']):
+            prof['warnings'].append(f'{name} 的链式公钥核对不了（缺少公钥）')
+        elif not cv['key_matches_chain']:
+            prof['errors'].append(f'{name} 的签名公钥和 vbmeta 链式描述里的不一致（按 AVB 规则这样启动不了）')
 
 
 # ---------------------------------------------------------------- super
@@ -83,8 +86,13 @@ def check_super(src, slot, prof):
     if 'super' not in src.parts:
         prof['errors'].append('设备上没有 super 分区')
         return
-    lp = layout.parse_lp(src.read_range('super', 0, layout.LP_HEAD_BYTES))
-    sup = {'bytes': src.size('super'), 'partitions': {}}
+    idx = layout.lp_slot_index(slot)
+    head = src.read_range('super', 0, layout.LP_HEAD_BYTES)
+    need = layout.lp_bytes_needed(head, idx)
+    if need > len(head):
+        head = src.read_range('super', 0, need)
+    lp = layout.parse_lp(head, idx)
+    sup = {'bytes': src.size('super'), 'metadata_slot': idx, 'partitions': {}}
     if src.kind == 'edl':
         p = src.parts['super']
         sup.update(lun=p['lun'], start=p['start'])
@@ -123,11 +131,14 @@ def check_firmware(src, slot, prof):
         full = sha256(d)
         fw[base] = {'partition': n, 'bytes': len(d), 'sha256': full, 'sha256_trim': trim_sha(d),
                     'version': avb.image_version(d)}
-        if base in known:
+        if known and base in known:
             total += 1
             hits += known[base] in (full, fw[base]['sha256_trim'])
     prof['firmware'] = fw
     prof['firmware_match'] = {'set': KNOWN_SETS['tested_firmware.json'], 'matched': hits, 'compared': total}
+    if known is None:
+        prof['firmware_match']['skipped'] = True
+        prof['warnings'].append(f'读不到参考固件清单 {TESTED_FIRMWARE}，没和参考设备比对底层固件')
     abl = 'abl' + slot if 'abl' + slot in data else 'abl'
     prof['abl'] = avb.check_abl(data.get(abl, b''))
 
@@ -223,8 +234,11 @@ def save(prof):
     d = os.path.join(WORK, 'device')
     os.makedirs(d, exist_ok=True)
     dev = prof.get('device', {})
-    ident = dev.get('chip_serial') or dev.get('ro.serialno') or 'unknown'
+    ident = str(dev.get('chip_serial') or dev.get('ro.serialno') or 'unknown')
+    ident = re.sub(r'[^0-9A-Za-z_.-]', '_', ident).strip('.')[:64] or 'unknown'   # the serial comes from the device
     path = os.path.join(d, f'{ident}-{time.strftime("%Y%m%d-%H%M%S")}.json')
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(d):
+        raise ValueError(f'设备档案路径不在 {d} 里：{path}')
     for p in (path, os.path.join(d, 'latest.json')):
         with open(p, 'w') as f:
             json.dump(prof, f, ensure_ascii=False, indent=1)
@@ -260,7 +274,9 @@ def report(prof):
         print(f'super {sup["bytes"] / 2**30:.1f} GiB  [{fs}]  → '
               + {'stock': '像联想原厂（ext4，推测）', 'modified': '多半已不是原厂（EROFS，推测）', 'unknown': '不确定'}[sup['content']])
     fm = prof.get('firmware_match')
-    if fm and fm['compared']:
+    if fm and fm.get('skipped'):
+        print('底层固件：没有参考清单，跳过比对')
+    elif fm and fm['compared']:
         print(f'底层固件与 {fm["set"]}：{fm["matched"]}/{fm["compared"]} 个分区一致')
     print('\n==== 结论 ====')
     if prof['ok']:
@@ -274,6 +290,9 @@ def report(prof):
 
 
 # ---------------------------------------------------------------- offline files
+
+MAX_ENTRY = 64 << 20   # abl / vbmeta images are a few MB at most
+MAX_TOTAL = 512 << 20
 
 ABL_RE = re.compile(r'^abl(_[ab])?\.(img|elf|mbn|bin)$', re.I)
 VBMETA_RE = re.compile(r'^vbmeta(_system|_vendor)?(_[ab])?\.(img|bin)$', re.I)
@@ -296,8 +315,20 @@ def collect(path):
         return out
     low = path.lower()
     if low.endswith('.zip'):
+        out, total = {}, 0
         with zipfile.ZipFile(path) as z:
-            return {i.filename: z.read(i) for i in z.infolist() if _wanted(i.filename)}
+            for i in z.infolist():
+                if not _wanted(i.filename):
+                    continue
+                if i.file_size > MAX_ENTRY or total + i.file_size > MAX_TOTAL:
+                    raise SourceError(f'{path}: {i.filename} 解压后 {i.file_size} 字节，不像 abl / vbmeta，拒绝读取')
+                with z.open(i) as f:
+                    data = f.read(MAX_ENTRY + 1)
+                if len(data) > MAX_ENTRY:
+                    raise SourceError(f'{path}: {i.filename} 实际解压超过 {MAX_ENTRY} 字节，拒绝读取')
+                total += len(data)
+                out[i.filename] = data
+        return out
     if low.endswith('.7z'):
         exe = shutil.which('7zz') or shutil.which('7z')
         if not exe:
@@ -334,13 +365,17 @@ def check_files(paths):
                 print(f'  ⚠ {r["error"]}')
             for k in r['keys']:
                 print(f'  ABL 内置 AVB 根公钥：RSA{k["bits"]}  {avb.key_str(k)}')
-            trusts.append(r['trusts_testkey'])
+            trusts.append((name, r['trusts_testkey']))
             continue
         vb = avb.find_vbmeta(data)
         if vb is None:
             print('  （不认识的文件，跳过）')
             continue
-        v = avb.parse_vbmeta(vb)
+        try:
+            v = avb.parse_vbmeta(vb)
+        except ValueError as e:
+            print(f'  ⚠ {e}')
+            continue
         print(f'  签名 {v["alg"]}  公钥 {avb.key_str(v["key"])}')
         print(f'  回滚索引 {v["rollback"]}（位置 {v["rollback_location"]}）  flags {v["flags"]}  {v["release"]}')
         for c in v['chains']:
@@ -348,10 +383,14 @@ def check_files(paths):
         if v['hashed']:
             print(f'  直接校验：{" ".join(v["hashed"])}')
     print('\n==== 结论 ====')
-    if True in trusts:
-        print('✅ ABL 信任 AOSP 测试密钥。')
-    elif trusts and all(t is False for t in trusts):
-        print('❌ ABL 只信任非测试密钥（多半是联想私钥）。')
-    else:
+    word = {True: '✅ 信任 AOSP 测试密钥', False: '❌ 只信任非测试密钥（多半是联想私钥）', None: '❓ 判断不了'}
+    for name, tr in trusts:
+        print(f'{name}：{word[tr]}')
+    if not trusts:
         print('❓ 没有可判断的 abl。')
-    return True in trusts
+        return False
+    if all(tr is True for _, tr in trusts):
+        print('✅ 所有 abl 都信任 AOSP 测试密钥。')
+        return True
+    print('❌ 不是所有 abl 都信任 AOSP 测试密钥（只看要刷的那个槽时，单独检查那个槽的 abl）。')
+    return False
