@@ -163,7 +163,9 @@ def build(lenovo_dir=None):
     if errs:
         raise SourceError(f'{lenovo_dir} 不能用来构建：' + '；'.join(errs))
     root = os.path.join(WORK, 'build', 'vendor')
-    name = os.path.basename(lenovo_dir.rstrip('/'))
+    name = os.path.basename(os.path.realpath(lenovo_dir))
+    if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._-]*', name):
+        raise SourceError(f'{lenovo_dir}：目录名 {name!r} 不能当输出目录名')
     out = os.path.join(root, name)
     print(f'vendor 侧：{lenovo_dir} → {out}')
     os.makedirs(root, exist_ok=True)
