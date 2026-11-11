@@ -163,10 +163,13 @@ def build(lenovo_dir=None):
     if errs:
         raise SourceError(f'{lenovo_dir} 不能用来构建：' + '；'.join(errs))
     root = os.path.join(WORK, 'build', 'vendor')
-    name = os.path.basename(os.path.realpath(lenovo_dir))
-    if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._-]*', name):
-        raise SourceError(f'{lenovo_dir}：目录名 {name!r} 不能当输出目录名')
+    src = os.path.realpath(lenovo_dir)
+    # output name from the source folder name: keep letters (any script), digits, . _ -, replace the rest
+    name = re.sub(r'[^\w.-]', '_', os.path.basename(src)).lstrip('.') or 'lenovo'
     out = os.path.join(root, name)
+    o = os.path.realpath(out)
+    if src == o or src.startswith(o + os.sep):
+        raise SourceError(f'来源 {lenovo_dir} 就在输出目录 {out} 里，替换输出会删掉来源：把来源放到别处')
     print(f'vendor 侧：{lenovo_dir} → {out}')
     os.makedirs(root, exist_ok=True)
     # build in a temporary folder and swap it in at the end: a failed rebuild never damages the previous result
