@@ -61,7 +61,12 @@ python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/
 | 文件 | 来源 | 用途 |
 |---|---|---|
 | HyperOS 3.0.305 移植包 + `1.5.04.495_WITHOUT_UBL` 免解锁补充包 | 酷安 @兰微卡鱼 | 9008 线刷包（固件、GPT、HyperOS 3 super）、作者原版启动镜像 |
-| 小米平板 8（yupei）`OS4.0.5.0.XPZCNXM` OTA 全量包 | 小米官方 | HyperOS 4 的 system/system_ext/product/mi_ext |
+| 小米平板 8（yupei）`OS4.0.5.0.XPZCNXM` OTA 全量包 | 小米官方（地址见下） | HyperOS 4 的 system/system_ext/product/mi_ext |
+
+yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包（Android 17，9922261403 字节；文件名里的 `4fe489f542` 是它 md5 的前 10 位）：
+[yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip](https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.5.0.XPZCNXM/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip)
+（小米 OTA 服务器的新加坡存储桶；`bigota.d.miui.net` 上同名路径，2026-11 时 HTTPS 证书不匹配）。
+国行 yupei 之后还有 4.0.10–4.0.12（2026-11-03），本项目验证过的只有 4.0.5.0。大文件建议用 `aria2c -c -x 16 -s 16 <地址>`。
 
 ## 1. 进入 9008 并完整备份 ✅
 
