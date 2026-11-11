@@ -10,6 +10,7 @@
   tb710fu.py import OTA.zip            Xiaomi Pad 8 (yupei) parts from the official Xiaomi full OTA package
   tb710fu.py vendor                    vendor side of the new super from the Lenovo stock parts (docs/porting.md)
   tb710fu.py framework                 system, system_ext, product from the imported Xiaomi images (docs/porting.md)
+  tb710fu.py bootchain                 boot chain + verity footers, test-key signed at the device's rollback indexes
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
 device profile (work/device/latest.json: slot, rollback indexes, super layout, firmware fingerprint) that
@@ -22,7 +23,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, check, framework, lenovo, sources, vendor, xiaomi  # noqa: E402
+from tb import backup, bootchain, check, framework, lenovo, sources, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -135,6 +136,14 @@ def cmd_framework(a):
     return 0 if framework.report(out, res) else 1
 
 
+def cmd_bootchain(a):
+    try:
+        out, res = bootchain.build(a.lenovo, a.vendor_dir, a.framework_dir, a.backup, a.profile, verity=not a.no_verity)
+    except sources.SourceError as e:
+        sys.exit(f'\n{e}')
+    return 0 if bootchain.report(out, res) else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -166,9 +175,16 @@ def main():
     f.add_argument('--no-finddevice', action='store_true',
                    help='去掉"查找设备"：清数据后第一次开机向导用（否则激活检查过不去）')
     f.add_argument('--debug', action='store_true', help='调试版：开机就有免授权 adb')
+    c = sub.add_parser('bootchain', help='启动链 + 各分区 verity，按设备回滚索引用测试密钥签名')
+    c.add_argument('--lenovo', help='pull 的输出目录（默认最新）')
+    c.add_argument('--vendor-dir', help='vendor 的输出目录（默认最新）')
+    c.add_argument('--framework-dir', help='framework 的输出目录（默认最新）')
+    c.add_argument('--backup', help='设备完整备份（默认最新）')
+    c.add_argument('--profile', help='设备档案（默认 work/device/latest.json）')
+    c.add_argument('--no-verity', action='store_true', help='vbmeta flags=1，关闭 dm-verity（备用方案）')
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
-            'vendor': cmd_vendor, 'framework': cmd_framework}[a.cmd](a)
+            'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain}[a.cmd](a)
 
 
 if __name__ == '__main__':
