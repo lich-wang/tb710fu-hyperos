@@ -136,6 +136,7 @@ def image_version(data):
 # ---------------------------------------------------------------- vbmeta
 
 FOOTER_SIZE = 64
+CHAIN_DO_NOT_USE_AB = 1 << 0   # chain partition descriptor flag: partition name has no _a/_b suffix
 
 
 def parse_footer(tail):
@@ -190,10 +191,10 @@ def parse_vbmeta(vb):
                 raise ValueError('vbmeta 损坏（描述符越界）')
             lim = body + nbf    # every field must stay inside this descriptor
             if tag == 4:    # chain partition
-                loc, nlen, klen, _ = struct.unpack_from('>LLLL', _span(vb, body, 16, '链式描述符', lim))
+                loc, nlen, klen, cflags = struct.unpack_from('>LLLL', _span(vb, body, 16, '链式描述符', lim))
                 p = body + 16 + 60
                 r['chains'].append({'partition': _span(vb, p, nlen, '链式分区名', lim).decode(errors='replace'),
-                                    'rollback_location': loc,
+                                    'rollback_location': loc, 'no_ab': bool(cflags & CHAIN_DO_NOT_USE_AB),
                                     'key': key_info(_span(vb, p + nlen, klen, '链式公钥', lim))})
             elif tag == 2:  # hash
                 q = body + 8 + 32

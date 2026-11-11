@@ -84,6 +84,8 @@ def parse_lp(head, slot_index=0):
     if magic != LP_HDR_MAGIC:
         raise ValueError(f'super 的 metadata 槽 {slot_index} 里没有 liblp header')
     tsize = struct.unpack_from('<I', head, off + 44)[0]
+    if hsize < 128 or hsize + tsize > max_size:   # 128 = header v10.0; one metadata copy holds at most max_size
+        raise ValueError(f'super metadata 损坏（header {hsize} + 表 {tsize} 字节超出单槽 {max_size}）')
     pt_off, pt_n, pt_sz, ex_off, ex_n, ex_sz = struct.unpack_from('<6I', head, off + 80)
     tables = head[off + hsize:off + hsize + tsize]
     if len(tables) < tsize:

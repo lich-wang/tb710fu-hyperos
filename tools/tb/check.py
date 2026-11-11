@@ -62,7 +62,7 @@ def check_chain(src, slot, prof):
     prof['vbmeta'] = {'vbmeta': v}
     prof['rollback'] = {str(v['rollback_location']): v['rollback']}
     for c in v['chains']:
-        name = c['partition'] + slot
+        name = c['partition'] if c.get('no_ab') else c['partition'] + slot
         if name not in src.parts:
             prof['warnings'].append(f'vbmeta 链到 {c["partition"]}，但设备上没有 {name}')
             continue
