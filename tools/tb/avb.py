@@ -219,7 +219,9 @@ def key_str(k):
 # ---------------------------------------------------------------- Lenovo advisory
 
 # Lenovo security advisory LEN-221035 (CVE-2026-92777, 2026-10-13), "Minimum Fixed Version" (worldwide
-# firmware). Builds below it are listed as affected (= AVB test key). China firmware (ZUXOS) is not covered.
+# firmware). Builds below it are listed as affected. China firmware (ZUXOS) is not covered.
+# Caution: the fixed version is no proof the test key is gone. The abl of ROW 17.5.04.059 (the listed fix for
+# TB710FU) still embeds only testkey_rsa4096, so the version alone never decides; only the abl does.
 LEN_221035 = {
     'TB710FU': '17.5.04.059', 'TB520FU': '17.5.10.309', 'TB321FU': '17.5.10.170', 'TB373FU': '17.5.10.057',
     'TB351FU': '17.5.10.199', 'TB570FU': '17.5.382', 'TB570ZU': '17.5.382', 'TB370FU': '17.0.280',
@@ -240,4 +242,5 @@ def advisory_hint(model, text):
     t = lambda v: tuple(int(x) for x in v.split('.'))
     if t(ver) < t(fixed):
         return f'ZUI {ver} 低于公告修复版 {fixed}：按公告属于受影响版本（测试密钥）'
-    return f'ZUI {ver} ≥ 公告修复版 {fixed}：按公告已修复，ABL 多半不再信任测试密钥'
+    return (f'ZUI {ver} ≥ 公告修复版 {fixed}：公告列为已修复，但实测 ROW 17.5.04.059 的 abl 仍内置测试密钥，'
+            '要以读出的 abl 为准')

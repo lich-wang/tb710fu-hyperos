@@ -39,8 +39,52 @@ python3 tools/tb710fu.py check 固件文件夹/.zip/.7z/镜像  # 离线：官�
 - **输出**：连着平板检查（9008 或 `--adb`）时写入设备档案 `work/device/latest.json`，后面的构建和刷入以它为准。离线检查文件只打印结果，不写档案。
 - **9008 方式**：还会核对芯片 HWID 和 OEM 公钥哈希，检查完自动复位开机（`--no-reset` 留在 9008）。
 
-联想公告 LEN-221035（CVE-2026-92777）只能用来推断：海外版 TB710FU **低于 ZUI 17.5.04.059** 的属于受影响版本（测试密钥）；国行 ZUXOS 不在公告里，只能实际读 abl。
-ZUXOS 1.5.04.495 免解锁补充包里的 `abl.img`（sha256 `6cfa16e6…`）带联想签名证书，内置的就是 `testkey_rsa4096`。
+联想公告 LEN-221035（CVE-2026-92777）把海外版 TB710FU 的修复版本定为 **ZUI 17.5.04.059**，但版本号不能代替实际读 abl：
+实测公告所说的修复版 ROW 059 的 abl 里，内置的仍然只有 `testkey_rsa4096`。实际读过的联想官方固件：
+
+| 固件 | abl sha256 | abl 内置根公钥 | 官方包 vbmeta 签名 | 官方 vbmeta_system 回滚索引 |
+|---|---|---|---|---|
+| CN ZUI 17.0.04.279（ST_250808） | `45106e3b…` | testkey_rsa4096 | testkey_rsa4096 | 1749081600 |
+| CN ZUI 17.0.04.354（ST_251111） | `c36229b8…` | testkey_rsa4096 | testkey_rsa4096 | 1759622400 |
+| CN ZUI 17.5.04.414（ST_260320） | `3c51d47f…` | testkey_rsa4096 | testkey_rsa4096 | 1772668800 |
+| ROW ZUI 17.5.04.059（ST_260327） | `09f3c057…` | testkey_rsa4096 | testkey_rsa4096 | 1772668800 |
+| ZUXOS 1.5.04.495（免解锁补充包） | `6cfa16e6…` | testkey_rsa4096 | — | 1783209600 |
+
+下载地址（lolinet 镜像，2026-11-11 下载；`.7z` 里是 QFIL 9008 线刷包，`image/` 下是各分区镜像和 rawprogram）：
+
+| 固件 | 文件 | 字节数 |
+|---|---|---|
+| CN 17.0.04.279 | [TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_CN/TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z) | 9055214792 |
+| CN 17.0.04.354 | [TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.354_ST_251111.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_CN/TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.354_ST_251111.7z) | 9201119510 |
+| CN 17.5.04.414 | [TB710FU_CN_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.414_ST_260320.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_CN/TB710FU_CN_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.414_ST_260320.7z) | 9517603070 |
+| ROW 17.5.04.059 | [TB710FU_ROW_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.059_ST_260327.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_ROW/TB710FU_ROW_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.059_ST_260327.7z) | 7631565787 |
+
+ROW 17.5.04.045（ST_260116）只在 [halabtech](https://news.halabtech.com/tb710fu_row_open_user_q00019-0_a16_zui_17-5-04-045_st_260116-zip/) 见到，没下载、没检查。lolinet 是第三方镜像，包本身没有联想的校验值可比；用之前以 `check` 读出的 abl 签名证书（LENOVO）和内容为准。
+大文件建议用 aria2 多连接下载（`aria2c -c -x 16 -s 16 <地址>`，`-c` 断点续传）。
+
+这些 abl 都带联想签名证书。联想官方包自己的 vbmeta/boot 就是用 AOSP 测试密钥签的，所以"信任测试密钥"是这一代固件的正常状态；公告修的具体是什么还不清楚。
+
+### 完整备份与取出联想原厂组件
+
+```bash
+python3 tools/tb710fu.py backup                     # 9008 只读完整备份，断了重跑会接着读
+python3 tools/tb710fu.py pull                       # 从最新的完整备份取件（没有就先备份）
+python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原厂系统时：从联想官方 9008 包取件（也可以给 .7z 或解压后的文件夹）
+```
+
+- **backup**：
+  - 读全部 LUN 的 GPT（主表和备份表），以及除 `userdata` 外的所有分区，存到 `work/backup/<芯片序列号>-<时间>/`；
+  - 超过 4 GiB 的非系统分区（例如装了 Linux 后的根分区）会跳过，并列出原因；
+  - 每读完一步就保存进度，super 按 1 GiB 一段读；
+  - 结束时写 `SHA256SUMS`。里面有唯一数据分区，要另外存一份。
+- **pull**：取出当前槽的组件，放到 `work/lenovo/…/`，并写一份 `lenovo.json`（sha256、build 指纹、AVB 签名和回滚索引）。
+  - 取哪些：vendor、odm、vendor_dlkm、system_dlkm（system、system_ext、product 留作参考），以及启动链 boot、init_boot、vendor_boot、dtbo、recovery、vbmeta、vbmeta_system。
+  - 原厂判断：只有 vendor 指纹以 `Lenovo/` 开头才算原厂，不是就拒绝。
+- **官方包**：
+  - 按 `rawprogram*.xml` 把 super 的各段（sparse 或 raw）拼回去，起点用包里的 `gpt_main0.bin` 定位；
+  - 国行包（如 CN 17.5.04.414）的 rawprogram 是明文 xml，可以用；海外 ROW 包（如 17.5.04.059）的 xml 是加密的 `.x` 文件，
+    只有联想的刷机工具能解开，不知道 super 各段的位置，所以不能用；
+  - 包里的底层固件会逐个和设备档案比对，版本不一致时提示兼容风险。本项目不写底层固件。
 
 ## 9008（EDL）
 
