@@ -1,10 +1,24 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # CodeRabbit 配置
 # 安装 CodeRabbit GitHub App 后，它会在 PR 的 head commit 上产生名为 "CodeRabbit" 的 check run。
 # 分支保护把该 check 设为必需，即实现「PR 必须被 CodeRabbit 审核过」。
 # 文档：https://docs.coderabbit.ai/pr-reviews/status-check
 
+language: "zh-CN"
+early_access: false
+
 reviews:
+  profile: "chill"
+  request_changes_workflow: true  # 有问题时 Request changes；问题全部解决后才 Approve
+  high_level_summary: true
   review_progress: true      # 以 check run (名称 CodeRabbit) 报告每次审查进度
   commit_status: true        # 同时发布同名 commit status
   fail_commit_status: true   # 审查出错时让 check 失败，而不是以 neutral 状态放行
   assess_linked_issues: true # 评估本次改动是否解决了所关联的 Issue
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_pause_after_reviewed_commits: 0  # 默认 5：之后的提交不再自动审查，批准就跟不上最新提交
+
+chat:
+  auto_reply: true
