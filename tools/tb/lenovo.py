@@ -130,8 +130,13 @@ def verdict(info):
     return errs
 
 
-def fresh_dir(path):
-    """Empty output directory, so files of an earlier extraction never count as this one's."""
+def fresh_dir(path, source):
+    """Empty output directory, so files of an earlier extraction never count as this one's.
+
+    Refuses when the input (package or backup) is that directory or inside it."""
+    out, src = os.path.realpath(path), os.path.realpath(source)
+    if src == out or src.startswith(out + os.sep):
+        raise SourceError(f'输入 {source} 在输出目录 {path} 里，清空它会删掉输入：把输入放到别处')
     if os.path.isdir(path):
         shutil.rmtree(path)
     os.makedirs(path)
@@ -145,7 +150,7 @@ def from_backup(bdir, st, force=False):
     if not slot:
         raise SourceError('备份里认不出当前槽')
     ident = os.path.basename(bdir.rstrip('/'))
-    out = fresh_dir(os.path.join(WORK, 'lenovo', f'device-{ident}'))
+    out = fresh_dir(os.path.join(WORK, 'lenovo', f'device-{ident}'), bdir)
     print(f'从备份 {bdir} 取件（当前槽 {slot}）→ {out}')
     for base in BOOT_CHAIN:
         src = os.path.join(bdir, f'{base}{slot}.bin')
@@ -338,7 +343,7 @@ def from_package(path, profile=None):
         if not prog:
             raise SourceError(f'{path}: 没找到 rawprogram*.xml，不像是 9008 线刷包')
         stem = re.sub(r'\.(zip|7z)$', '', os.path.basename(path.rstrip('/')), flags=re.I)
-        out = fresh_dir(os.path.join(WORK, 'lenovo', f'package-{stem}'))
+        out = fresh_dir(os.path.join(WORK, 'lenovo', f'package-{stem}'), path)
         print(f'从联想官方包 {path} 取件 → {out}')
         for base in BOOT_CHAIN:
             e = next((x for x in prog if x['label'] in (base + '_a', base)), None)

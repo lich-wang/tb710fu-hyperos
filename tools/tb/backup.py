@@ -82,8 +82,20 @@ def find_resumable(src):
     return None
 
 
+ITEM_NAME = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.-]*\.bin$')   # what run() writes: <partition>.bin, gpt_*.bin
+
+
+def check_item_names(d, items):
+    """backup.json is read back from disk: every recorded name must be a plain file name inside d."""
+    root = os.path.realpath(d)
+    for name in items:
+        if not ITEM_NAME.match(name) or os.path.dirname(os.path.realpath(os.path.join(d, name))) != root:
+            raise SourceError(f'{d}/backup.json 里有不合法的文件名 {name!r}，不使用这个备份')
+
+
 def verify_items(d, items, hashes=True):
     """Names of recorded files that are missing, have the wrong size or (hashes=True) the wrong sha256."""
+    check_item_names(d, items)
     bad = []
     for name, v in sorted(items.items()):
         p = os.path.join(d, name)
@@ -96,7 +108,8 @@ def _private_dir(path):
     """Create path readable by the owner only (backups hold IMEI, calibration and keys). An existing directory is
     left as it is (it may be the user's own), with a warning when others can read it."""
     if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.dirname(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
         os.mkdir(path, 0o700)
         os.chmod(path, 0o700)          # mkdir's mode is filtered by umask
     elif os.stat(path).st_mode & 0o077:
