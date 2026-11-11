@@ -95,8 +95,9 @@
   合并前确认 CodeRabbit 的最新 Review 是 `APPROVED`，**且针对的是 PR 当前的 head 提交**（之后又推送过的话，旧的批准不算数）：
   ```bash
   gh pr view <PR> --json headRefOid --jq .headRefOid
-  gh api repos/{owner}/{repo}/pulls/<PR>/reviews \
-    --jq '[.[] | select(.user.login == "coderabbitai[bot]")] | last | {state, commit_id}'
+  # --paginate 读完所有页（默认每页 30 条），最后一行就是 CodeRabbit 最新的 Review
+  gh api --paginate repos/{owner}/{repo}/pulls/<PR>/reviews \
+    --jq '.[] | select(.user.login == "coderabbitai[bot]") | "\(.state) \(.commit_id)"' | tail -n 1
   ```
   两者的提交号必须一致、`state` 为 `APPROVED`，并确认没有未解决的讨论。
 - 在评论里发 `@coderabbitai review` 若回复 “Already reviewed the last commit”，说明最新提交已经审过，直接按上一条查看 Review 状态。
