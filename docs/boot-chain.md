@@ -50,6 +50,18 @@ python3 tools/tb710fu.py check 固件文件夹/.zip/.7z/镜像  # 离线：官�
 | ROW ZUI 17.5.04.059（ST_260327） | `09f3c057…` | testkey_rsa4096 | testkey_rsa4096 | 1772668800 |
 | ZUXOS 1.5.04.495（免解锁补充包） | `6cfa16e6…` | testkey_rsa4096 | — | 1783209600 |
 
+下载地址（lolinet 镜像，2026-11-11 下载；`.7z` 里是 QFIL 9008 线刷包，`image/` 下是各分区镜像和 rawprogram）：
+
+| 固件 | 文件 | 字节数 |
+|---|---|---|
+| CN 17.0.04.279 | [TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_CN/TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z) | 9055214792 |
+| CN 17.0.04.354 | [TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.354_ST_251111.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_CN/TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.354_ST_251111.7z) | 9201119510 |
+| CN 17.5.04.414 | [TB710FU_CN_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.414_ST_260320.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_CN/TB710FU_CN_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.414_ST_260320.7z) | 9517603070 |
+| ROW 17.5.04.059 | [TB710FU_ROW_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.059_ST_260327.7z](https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/TB710FU_ROW/TB710FU_ROW_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.059_ST_260327.7z) | 7631565787 |
+
+ROW 17.5.04.045（ST_260116）只在 [halabtech](https://news.halabtech.com/tb710fu_row_open_user_q00019-0_a16_zui_17-5-04-045_st_260116-zip/) 见到，没下载、没检查。lolinet 是第三方镜像，包本身没有联想的校验值可比；用之前以 `check` 读出的 abl 签名证书（LENOVO）和内容为准。
+大文件建议用 aria2 多连接下载（`aria2c -c -x 16 -s 16 <地址>`，`-c` 断点续传）。
+
 这些 abl 都带联想签名证书。联想官方包自己的 vbmeta/boot 就是用 AOSP 测试密钥签的，所以"信任测试密钥"是这一代固件的正常状态；公告修的具体是什么还不清楚。
 
 ### 完整备份与取出联想原厂组件
