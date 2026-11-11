@@ -55,7 +55,7 @@ Ubuntu 的 secilc 3.9 不认识 Android 17 新加的 `(policycap functionfs_secl
 |---|---|---|
 | `etc/fstab.qcom` | 每个逻辑分区加一条 erofs；system、vendor 等去掉了 `avb=` | **要做**：加 erofs 条目。`avb=` 保留，因为我们会用 testkey 给 vbmeta_system 和新镜像重签（#8），不需要关校验。vendor_boot 里的第一阶段 fstab 也要同样改（#8） |
 | `build.prop` | vendor 身份改成 `Xiaomi/mivendor_pad8650_cn` | **不改**：vendor 保持联想身份，小米机型身份放在 product 的 build.prop（#7）。小米框架是否读 `ro.product.vendor.*` 待真机 |
-| `etc/init/init.spdaemon.rc`、`bin/init.qcom.post_boot.sh` | `ro.product.device`、`ro.product.name` 改成读 `lwky.hyper.*` | **要做，换个方式**：product 把机型改成小米后，`ro.product.device` 不再是 `pineapple`，高通脚本会走错分支。直接写死 `pineapple`（这份 vendor 只跑在 TB710FU 上），不引入新属性 |
+| `etc/init/init.spdaemon.rc`、`bin/init.qcom.post_boot.sh` | `ro.product.device`、`ro.product.name` 改成读 `lwky.hyper.*` | **不要**。原厂系统上这两个属性的值就是 `TB710FU`：`post_boot.sh` 比较的是 msmnile/kona/msm8952 等别的平台名，`init.spdaemon.rc` 判断的是 `ro.product.device=pineapple`，原厂本来就都不匹配。换成小米的机型名，结果和原厂一样。作者的改动反而让 spdaemon 那段在原厂不执行的情况下执行了 |
 | `etc/init/vendor.lenovo.hardware.keyboard.rc` | 多出一行 `eabled`（拼写错误，init 会报错跳过） | 不要 |
 | `etc/selinux/*` | 合并了小米 mivendor 的整套策略（`vendor_sepolicy.cil` 里和小米相关的规则，原厂 54 行，移植包 1197 行） | **不要整套**。只给真正加进来的小米 HAL 写最小策略（类型、`service_contexts`、`file_contexts`、必要的 allow） |
 | `etc/selinux/vendor_mac_permissions.xml` | 换成 yupei 的 | 不要（推测只和小米 vendor 应用的签名有关，待真机） |
@@ -103,7 +103,12 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
 
 ## 下一步
 
-- **#6（vendor/odm）**：联想原厂 vendor 加三处改动——fstab 加 erofs、高通脚本写死 `pineapple`、去掉坏的 rc 行。第一版不加小米 HAL。
+- **#6（vendor/odm）✅**：`tb710fu.py vendor`。
+  - vendor 只改 `etc/fstab.qcom` 一处：每个逻辑分区加一条 erofs 条目，`avb=` 保留；
+  - 做法是用 e2fsprogs 原地修改 ext4（先 `e2fsck -E unshare_blocks` 去掉 Android 的块去重，再用 debugfs 替换文件，保留权限、属主和 SELinux 标签，最后收缩）；
+  - odm、vendor_dlkm、system_dlkm 原样；四个镜像都去掉了 AVB footer，由构建重签；
+  - 用 CN 414 实测：3820 个条目里只有 fstab 不同，`e2fsck -fn` 干净，vendor 从 1.8 GB 变成 2.0 GB（拆开共用块后多出约 250 MB）；
+  - 第一版不加小米 HAL。
 - **#7（框架侧）**：去掉 `sepolicy_compat.cil` 和 `media.settings.xml` 的改动；lwky 只保留 `/proc` 那几段；小米机型身份放在 product。
 - **#8（启动链）**：vendor_boot 的第一阶段 fstab 加 erofs；保留 `avb=`，按设备的回滚索引重签。
 - **#11（真机）**：逐项确认色彩风格、充电、手写笔、皮套、相机/视频、小米账号等功能；缺哪个 HAL 再按上面的办法从 yupei 加，并给它写最小 SELinux 策略。
