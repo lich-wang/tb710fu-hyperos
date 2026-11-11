@@ -1,0 +1,12 @@
+#!/bin/sh
+# 禁止从本机推送（或删除）main / master。启用：git config core.hooksPath .githooks
+# 按推送的目标 ref 判断，所以 `git push origin feature:main` 也会被拦住。
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      echo "错误：禁止直接推送到 ${remote_ref#refs/heads/}。请在特性分支上提交，通过 PR 合入。" >&2
+      exit 1
+      ;;
+  esac
+done
+exit 0
