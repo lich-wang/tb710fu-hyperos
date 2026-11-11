@@ -23,7 +23,7 @@
 Mac 上的工具：
 
 ```bash
-brew install android-platform-tools payload-dumper-go erofs-utils zstd p7zip python@3.12
+brew install android-platform-tools payload-dumper-go erofs-utils zstd p7zip python@3.12 apktool openjdk
 python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl
 ```
 
