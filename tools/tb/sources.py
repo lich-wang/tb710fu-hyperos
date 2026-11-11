@@ -33,7 +33,8 @@ def sha256(data):
 def edl_bin():
     e = os.environ.get('EDL')
     if e:
-        return e
+        # a path (not a bare command name) is made absolute: edl runs with the log folder as working directory
+        return os.path.abspath(e) if os.sep in e else e
     for c in (os.path.join(TOOLS, 'venv/bin/edl'), os.path.join(os.path.dirname(REPO), 'tools/venv/bin/edl')):
         if os.access(c, os.X_OK):
             return c

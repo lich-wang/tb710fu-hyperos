@@ -48,7 +48,9 @@ def unsparse(f, out, base=0):
                 out.write(b)
                 left -= len(b)
         elif ctype == FILL:
-            pat = f.read(4)
+            pat = f.read(4) if data_len == 4 else b''
+            if len(pat) != 4:
+                raise ValueError('sparse FILL 块不完整（填充值应为 4 字节）')
             if pat != b'\0\0\0\0':
                 out.seek(base + pos)
                 piece = pat * (COPY // 4)

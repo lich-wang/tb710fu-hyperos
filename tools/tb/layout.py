@@ -52,6 +52,8 @@ def gpt_header(blob, sector=SECTOR):
 def gpt_partitions(blob, sector=SECTOR):
     """{name: (first_lba, sectors)} from a primary GPT dump (gpt_main*.bin of a backup or a 9008 package)."""
     h = gpt_header(blob, sector)
+    if h['entry_size'] < 128 or h['entries_lba'] * sector + h['entries'] * h['entry_size'] > len(blob):
+        raise ValueError('GPT 分区项数组不完整（头里声明的项数 × 项长度超出了文件）')
     out = {}
     for i in range(h['entries']):
         e = blob[h['entries_lba'] * sector + i * h['entry_size']:][:h['entry_size']]

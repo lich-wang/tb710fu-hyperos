@@ -69,7 +69,7 @@ ROW 17.5.04.045（ST_260116）只在 [halabtech](https://news.halabtech.com/tb71
 ```bash
 python3 tools/tb710fu.py backup                     # 9008 只读完整备份，断了重跑会接着读
 python3 tools/tb710fu.py pull                       # 从最新的完整备份取件（没有就先备份）
-python3 tools/tb710fu.py pull --package 包.zip|.7z|文件夹   # 平板已不是原厂系统时：从联想官方 9008 包取件
+python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原厂系统时：从联想官方 9008 包取件（也可以给 .7z 或解压后的文件夹）
 ```
 
 - **backup**：

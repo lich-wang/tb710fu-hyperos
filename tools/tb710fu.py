@@ -75,10 +75,10 @@ def reset(src, a):
             print(f'复位失败（拔线长按电源键重启即可）：{e}')
 
 
-def do_backup(a):
+def do_backup(a, resume=True):
     src = edl_source(a)
     try:
-        return backup.run(src, a.out, src.sahara.get('chip_serial'))
+        return backup.run(src, getattr(a, 'out', None), src.sahara.get('chip_serial'), resume=resume)
     finally:
         reset(src, a)
 
@@ -103,7 +103,7 @@ def cmd_pull(a):
             bdir = a.backup or (None if a.new_backup else backup.latest())
             if not bdir:
                 print('先做完整备份（只读，二十多 GB，要十几分钟到半小时）。')
-                bdir = do_backup(a)
+                bdir = do_backup(a, resume=not a.new_backup)
             st = backup.load(bdir)
             out, info = lenovo.from_backup(bdir, st)
     except sources.SourceError as e:

@@ -7,7 +7,7 @@ Layout of a backup directory (work/backup/<chip serial>-<time>/):
 The state is saved after every step, so an interrupted backup continues where it stopped (same device,
 same partition table). super is read in 1 GiB pieces for the same reason.
 """
-import hashlib, json, os, shutil, time
+import hashlib, json, os, re, shutil, time
 
 from . import layout
 from .sources import WORK, SourceError
@@ -54,36 +54,89 @@ def plan(src):
     return take, skipped
 
 
+def _read_state(d):
+    with open(os.path.join(d, 'backup.json')) as f:
+        return json.load(f)
+
+
+def same_device(st, src):
+    """True only when both the backup and the connected device report the same chip serial (or HWID + PK hash
+    when there is no serial). Missing identity on either side -> False: never merge two devices' backups."""
+    a, b = st.get('device') or {}, src.sahara or {}
+    if a.get('chip_serial') and b.get('chip_serial'):
+        return a['chip_serial'] == b['chip_serial']
+    return False
+
+
 def find_resumable(src):
-    """Latest incomplete backup of this device with the same partition table, or None."""
+    """Latest incomplete backup of this device (same chip serial) with the same partition table, or None."""
     root = os.path.join(WORK, 'backup')
     table = _table(src)
     for d in sorted((os.path.join(root, x) for x in os.listdir(root)) if os.path.isdir(root) else [], reverse=True):
         try:
-            st = json.load(open(os.path.join(d, 'backup.json')))
+            st = _read_state(d)
         except (OSError, ValueError):
             continue
-        if not st.get('complete') and st.get('table') == table:
+        if not st.get('complete') and st.get('table') == table and same_device(st, src):
             return d
     return None
+
+
+def verify_items(d, items, hashes=True):
+    """Names of recorded files that are missing, have the wrong size or (hashes=True) the wrong sha256."""
+    bad = []
+    for name, v in sorted(items.items()):
+        p = os.path.join(d, name)
+        if not os.path.isfile(p) or os.path.getsize(p) != v['bytes'] or (hashes and file_sha256(p) != v['sha256']):
+            bad.append(name)
+    return bad
+
+
+def _private_dir(path):
+    """Create path readable by the owner only (backups hold IMEI, calibration and keys). An existing directory is
+    left as it is (it may be the user's own), with a warning when others can read it."""
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.mkdir(path, 0o700)
+        os.chmod(path, 0o700)          # mkdir's mode is filtered by umask
+    elif os.stat(path).st_mode & 0o077:
+        print(f'  ⚠ {path} 其他用户可以访问；里面会有唯一数据分区，建议 chmod 700')
 
 
 def gib(n):
     return f'{n / 2**30:.1f} GiB'
 
 
-def run(src, dest=None, ident=None):
-    """Back up src (an EdlSource) into dest (new or resumed). Returns the backup directory."""
+def run(src, dest=None, ident=None, resume=True):
+    """Back up src (an EdlSource) into dest (new or resumed). Returns the backup directory.
+
+    resume=False never picks up an unfinished backup on its own (an explicit dest is still continued)."""
     take, skipped = plan(src)
-    dest = dest or find_resumable(src)
+    missing_luns = sorted({p['lun'] for p in src.parts.values()} - {int(k) for k in src.luns})
+    if missing_luns:
+        raise SourceError(f'printgpt 没给出 LUN {missing_luns} 的大小，读不了这些 LUN 的 GPT，不备份')
+    dest = dest or (find_resumable(src) if resume else None)
     resumed = bool(dest and os.path.exists(os.path.join(dest, 'backup.json')))
     if not dest:
-        dest = os.path.join(WORK, 'backup', f'{ident or "device"}-{time.strftime("%Y%m%d-%H%M%S")}')
-    os.makedirs(dest, exist_ok=True)
+        safe = re.sub(r'[^0-9A-Za-z_.-]', '_', str(ident or 'device')).strip('.')[:64] or 'device'
+        dest = os.path.join(WORK, 'backup', f'{safe}-{time.strftime("%Y%m%d-%H%M%S")}')
+    _private_dir(dest)
     if resumed:
-        st = json.load(open(os.path.join(dest, 'backup.json')))
+        st = _read_state(dest)
         if st.get('table') != _table(src):
             raise SourceError(f'{dest} 是另一个分区表的备份，不能接着读。换一个目录。')
+        mine, theirs = (src.sahara or {}).get('chip_serial'), (st.get('device') or {}).get('chip_serial')
+        if mine and theirs and mine != theirs:
+            raise SourceError(f'{dest} 是另一台平板（芯片序列号 {theirs}）的备份，不能接着读。换一个目录。')
+        if not same_device(st, src):    # only reachable with an explicit --out
+            print('  ⚠ 这次没读到芯片序列号，核对不了是不是同一台平板；你指定了这个目录，按同一台处理')
+        print('  核对已经读好的文件 …', flush=True)
+        bad = verify_items(dest, st['items'])
+        for name in bad:
+            print(f'  {name} 丢失或和记录不符，重新读')
+            del st['items'][name]
+            if os.path.exists(os.path.join(dest, name)):
+                os.remove(os.path.join(dest, name))
     else:
         st = {'schema': 1, 'created': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'device': dict(src.sahara),
               'slot': src.slot, 'luns': src.luns, 'table': _table(src), 'items': {}, 'complete': False,
@@ -103,13 +156,23 @@ def run(src, dest=None, ident=None):
     _save(dest, st)
     t0 = time.time()
 
-    # GPT of every LUN: primary (MBR + header + entries) and the backup copy at the end
+    # GPT of every LUN: primary (MBR + header + the whole entry array) and the backup copy at the end
     for lun, total_sectors in sorted(src.luns.items(), key=lambda kv: int(kv[0])):
         lun = int(lun)
         main, back = f'gpt_main{lun}.bin', f'gpt_backup{lun}.bin'
         if main not in items:
             p = os.path.join(dest, main)
-            src.read_sectors(lun, 0, 6, p)
+            src.read_sectors(lun, 0, 2, p)
+            with open(p, 'rb') as f:
+                h = layout.gpt_header(f.read())
+            n = h['entries_lba'] + h['entries_sectors']
+            if h['entries_lba'] < 2 or n > 64:
+                raise SourceError(f'LUN {lun} 的 GPT 头不合理（分区项从 LBA {h["entries_lba"]} 起，共 {n} 扇区）')
+            src.read_sectors(lun, 0, n, p)
+            if os.path.getsize(p) != n * layout.SECTOR:
+                raise SourceError(f'LUN {lun} 的 GPT 读到的长度不对')
+            with open(p, 'rb') as f:
+                layout.gpt_partitions(f.read())    # the entry array is complete
             items[main] = {'bytes': os.path.getsize(p), 'sha256': file_sha256(p)}
             _save(dest, st)
         if back not in items:
@@ -185,13 +248,17 @@ def run(src, dest=None, ident=None):
 
 
 def load(d):
-    """backup.json of a finished backup (checks that it is complete)."""
+    """backup.json of a finished backup: complete, and every recorded file present with its recorded sha256."""
     try:
-        st = json.load(open(os.path.join(d, 'backup.json')))
+        st = _read_state(d)
     except (OSError, ValueError):
         raise SourceError(f'{d} 不是本工具做的备份（没有 backup.json）')
     if not st.get('complete'):
         raise SourceError(f'{d} 还没备份完，先接着跑 backup')
+    print(f'核对备份 {d} …', flush=True)
+    bad = verify_items(d, st.get('items', {}))
+    if bad:
+        raise SourceError(f'{d} 里这些文件丢失或和记录不符：{", ".join(bad)}。重新备份。')
     return st
 
 
@@ -199,7 +266,7 @@ def latest():
     root = os.path.join(WORK, 'backup')
     for d in sorted((os.path.join(root, x) for x in os.listdir(root)) if os.path.isdir(root) else [], reverse=True):
         try:
-            if json.load(open(os.path.join(d, 'backup.json'))).get('complete'):
+            if _read_state(d).get('complete'):
                 return d
         except (OSError, ValueError):
             continue

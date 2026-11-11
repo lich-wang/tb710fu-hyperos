@@ -130,6 +130,14 @@ def verdict(info):
     return errs
 
 
+def fresh_dir(path):
+    """Empty output directory, so files of an earlier extraction never count as this one's."""
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    os.makedirs(path)
+    return path
+
+
 # ---------------------------------------------------------------- from a backup
 
 def from_backup(bdir, st, force=False):
@@ -137,8 +145,7 @@ def from_backup(bdir, st, force=False):
     if not slot:
         raise SourceError('备份里认不出当前槽')
     ident = os.path.basename(bdir.rstrip('/'))
-    out = os.path.join(WORK, 'lenovo', f'device-{ident}')
-    os.makedirs(out, exist_ok=True)
+    out = fresh_dir(os.path.join(WORK, 'lenovo', f'device-{ident}'))
     print(f'从备份 {bdir} 取件（当前槽 {slot}）→ {out}')
     for base in BOOT_CHAIN:
         src = os.path.join(bdir, f'{base}{slot}.bin')
@@ -174,8 +181,12 @@ class Package:
             print(f'  解压 {path}（十几 GB，要等几分钟）…', flush=True)
             # everything pull needs is in the images folder; leave out what it never reads (user data, tools)
             skip = ['userdata_*', 'metadata*.img', 'persist.img', 'Driver.tar.gz', '*.exe', '*.dll', '*.hex', '*.HEX']
-            subprocess.run([exe, 'x', '-y', f'-o{self.tmp}', path] + [f'-xr!{x}' for x in skip], check=True,
-                           stdout=subprocess.DEVNULL)
+            try:
+                subprocess.run([exe, 'x', '-y', f'-o{self.tmp}', path] + [f'-xr!{x}' for x in skip], check=True,
+                               stdout=subprocess.DEVNULL)
+            except (subprocess.CalledProcessError, KeyboardInterrupt):
+                shutil.rmtree(self.tmp, ignore_errors=True)
+                raise SourceError(f'{path}: 解压失败（包损坏或没下载完？）')
             self.root = self.tmp
         else:
             raise SourceError(f'{path}: 要一个文件夹、.zip 或 .7z')
@@ -287,7 +298,8 @@ class _Forward:
         if pos < self.pos:
             raise ValueError('不能回退')
         while self.pos < pos:
-            self.read(min(pos - self.pos, 1 << 22))
+            if not self.read(min(pos - self.pos, 1 << 22)):
+                raise ValueError('sparse 镜像被截断（跳过时到了文件结尾）')
 
     def read(self, n):
         b = self.f.read(n)
@@ -326,8 +338,7 @@ def from_package(path, profile=None):
         if not prog:
             raise SourceError(f'{path}: 没找到 rawprogram*.xml，不像是 9008 线刷包')
         stem = re.sub(r'\.(zip|7z)$', '', os.path.basename(path.rstrip('/')), flags=re.I)
-        out = os.path.join(WORK, 'lenovo', f'package-{stem}')
-        os.makedirs(out, exist_ok=True)
+        out = fresh_dir(os.path.join(WORK, 'lenovo', f'package-{stem}'))
         print(f'从联想官方包 {path} 取件 → {out}')
         for base in BOOT_CHAIN:
             e = next((x for x in prog if x['label'] in (base + '_a', base)), None)
