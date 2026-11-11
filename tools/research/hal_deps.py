@@ -1,87 +1,139 @@
 """Can yupei's Xiaomi HAL binaries run on the Lenovo vendor? (docs/porting.md)
 
 usage: sudo python3 hal_deps.py MNT   (len_/xm_ mounts, see mount.sh)
-Resolves NEEDED transitively against Lenovo vendor/odm + VNDK v34 apex + LLNDK (libraries only yupei has are
-pulled in and listed), then checks every undefined dynamic symbol against the providers (bionic from the runtime apex)."""
-import glob, os, re, subprocess, sys, zipfile, tempfile
+Resolves NEEDED transitively (through every provider: Lenovo vendor/odm, VNDK v34 apex, LLNDK/system, and
+libraries only yupei has, which are pulled in and listed), then checks every strong undefined dynamic symbol of
+the yupei objects against what the resolved providers export (bionic from the runtime apex). Weak undefined
+symbols may stay unresolved and are not reported. A failing readelf / nm stops the script."""
+import glob, os, re, shutil, subprocess, sys, tempfile, zipfile
+
 M = sys.argv[1]
-def names(pat): return {os.path.basename(p): p for p in glob.glob(pat, recursive=True)}
+
+
+def run(cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode:
+        sys.exit(f'{" ".join(cmd)} failed ({p.returncode}): {p.stderr.strip()[:300]}')
+    return p.stdout
+
+
+def names(pat):
+    return {os.path.basename(p): p for p in glob.glob(pat, recursive=True)}
+
+
+def needed(p):
+    return re.findall(r'\(NEEDED\).*\[(.+?)\]', run(['readelf', '-d', p]))
+
+
+def nm(p, undefined):
+    """undefined=True -> {strong undefined symbols}; False -> {defined symbols}."""
+    out = run(['nm', '-D', '--undefined-only' if undefined else '--defined-only', p])
+    syms = set()
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) < 2:
+            continue
+        kind, name = f[-2], f[-1].split('@')[0]
+        if undefined and kind in ('w', 'v'):       # weak: allowed to stay unresolved
+            continue
+        syms.add(name)
+    return syms
+
+
 lenlib = {**names(f'{M}/len_vendor/lib64/**/*.so'), **names(f'{M}/len_odm/lib64/**/*.so')}
 ylib = {**names(f'{M}/xm_vendor/lib64/**/*.so'), **names(f'{M}/xm_odm/lib64/**/*.so')}
-# VNDK v34 apex libs
-t = tempfile.mkdtemp()
-ap = glob.glob(f'{M}/xm_system_ext/apex/com.android.vndk.v34.apex')[0]
-z = zipfile.ZipFile(ap); z.extract('apex_payload.img', t)
-os.makedirs(f'{t}/m', exist_ok=True)
-subprocess.run(['mount', '-o', 'ro,loop', f'{t}/apex_payload.img', f'{t}/m'], check=True)
-vndk = set(os.listdir(f'{t}/m/lib64'))
-llndk = set()
-for f in glob.glob(f'{M}/xm_system/system/etc/*llndk*.txt') + glob.glob(f'{t}/m/etc/*llndk*.txt'):
-    llndk |= set(open(f).read().split())
-llndk |= {'libc.so', 'libm.so', 'libdl.so', 'liblog.so', 'libandroid_net.so', 'libvndksupport.so', 'libbinder_ndk.so',
-          'libsync.so', 'libnativewindow.so', 'libvulkan.so', 'libEGL.so', 'libGLESv2.so', 'libGLESv3.so', 'libGLESv1_CM.so',
-          'libmediandk.so', 'libft2.so', 'libselinux.so', 'libz.so'}
-def needed(p):
-    return re.findall(r'\(NEEDED\).*\[(.+?)\]', subprocess.run(['readelf', '-d', p], capture_output=True, text=True).stdout)
 roots = ['bin/hw/vendor.xiaomi.hardware.displayfeature_aidl-service', 'bin/displayfeature',
          'bin/hw/vendor.xiaomi.hardware.micharge-service', 'bin/hw/vendor.xiaomi.hardware.misys.core-service',
          'bin/hypsys_vendor']
-for r in roots:
-    p = f'{M}/xm_vendor/{r}'
-    if not os.path.exists(p):
-        print(f'{r}: not in yupei vendor'); continue
-    pulled, missing, seen, todo = [], [], set(), needed(p)
-    while todo:
-        n = todo.pop()
-        if n in seen: continue
-        seen.add(n)
-        if n in lenlib or n in vndk or n in llndk: continue
-        if n in ylib:
-            pulled.append(n); todo += needed(ylib[n])
-        else:
-            missing.append(n)
-    print(f'{r}\n   from yupei: {sorted(pulled)}\n   UNRESOLVED: {sorted(missing)}')
-subprocess.run(['umount', f'{t}/m'])
 
-# bionic (libc/libm/libdl) lives in the runtime apex
-rt = glob.glob(f'{M}/xm_system/system/apex/com.android.runtime*.apex')[0]
-zipfile.ZipFile(rt).extract('apex_payload.img', t + '/rt'); os.makedirs(t + '/rtm', exist_ok=True)
-subprocess.run(['mount', '-o', 'ro,loop', t + '/rt/apex_payload.img', t + '/rtm'], check=True)
-BIONIC = set()
-for b in glob.glob(t + '/rtm/lib64/bionic/*.so'):
-    out = subprocess.run(['nm', '-D', '--defined-only', b], capture_output=True, text=True).stdout
-    BIONIC |= {l.split()[-1].split('@')[0] for l in out.splitlines() if l.strip()}
-subprocess.run(['umount', t + '/rtm'])
-# ---- symbol check: undefined dynamic symbols of each yupei object vs what the resolved providers export
-subprocess.run(['mount', '-o', 'ro,loop', f'{t}/apex_payload.img', f'{t}/m'], check=True)
-def prov(n):
-    for d in (lenlib, ylib):
-        if n in d and (d is lenlib or n not in lenlib and n not in os.listdir(f'{t}/m/lib64')): return d[n]
-    if os.path.exists(f'{t}/m/lib64/{n}'): return f'{t}/m/lib64/{n}'
-    for c in (f'{M}/xm_system/system/lib64/{n}',):
-        if os.path.exists(c): return c
-    return None
-def syms(p, undefined):
-    flag = '--undefined-only' if undefined else '--defined-only'
-    out = subprocess.run(['nm', '-D', flag, p], capture_output=True, text=True).stdout
-    return {l.split()[-1].split('@')[0] for l in out.splitlines() if l.strip()}
-for r in roots:
-    p = f'{M}/xm_vendor/{r}'
-    objs, seen, todo = [p], set(), needed(p)
-    while todo:
-        n = todo.pop()
-        if n in seen: continue
-        seen.add(n)
-        if n in ylib and n not in lenlib and n not in os.listdir(f'{t}/m/lib64'):
-            objs.append(ylib[n]); todo += needed(ylib[n])
-    exported = set(BIONIC)
-    for o in objs:
-        for n in needed(o):
-            q = prov(n)
-            if q: exported |= syms(q, False)
-        exported |= syms(o, False)
-    und = set()
-    for o in objs: und |= syms(o, True)
-    miss = sorted(s for s in und - exported if not s.startswith(('__cxa', '_ITM', '__gmon', '__register', '__deregister')))
-    print(f'{r}: {len(objs)} objects, {len(und)} undefined symbols, unresolved {len(miss)}', miss[:12])
-subprocess.run(['umount', f'{t}/m'])
+t = tempfile.mkdtemp()
+mounted = []
+
+
+def mount_apex(apex, name):
+    d = os.path.join(t, name)
+    os.makedirs(d + '.img')
+    zipfile.ZipFile(apex).extract('apex_payload.img', d + '.img')
+    os.makedirs(d)
+    subprocess.run(['mount', '-o', 'ro,loop', os.path.join(d + '.img', 'apex_payload.img'), d], check=True)
+    mounted.append(d)
+    return d
+
+
+failed = False
+try:
+    vd = mount_apex(glob.glob(f'{M}/xm_system_ext/apex/com.android.vndk.v34.apex')[0], 'vndk')
+    rd = mount_apex(glob.glob(f'{M}/xm_system/system/apex/com.android.runtime*.apex')[0], 'runtime')
+    vndk = {n: os.path.join(vd, 'lib64', n) for n in os.listdir(os.path.join(vd, 'lib64'))}
+    llndk = set()
+    for f in glob.glob(f'{M}/xm_system/system/etc/*llndk*.txt') + glob.glob(f'{vd}/etc/*llndk*.txt'):
+        llndk |= set(open(f).read().split())
+    llndk |= {'libc.so', 'libm.so', 'libdl.so', 'liblog.so', 'libandroid_net.so', 'libvndksupport.so',
+              'libbinder_ndk.so', 'libsync.so', 'libnativewindow.so', 'libvulkan.so', 'libEGL.so', 'libGLESv2.so',
+              'libGLESv3.so', 'libGLESv1_CM.so', 'libmediandk.so', 'libft2.so', 'libselinux.so', 'libz.so'}
+    bionic = {os.path.basename(b): b for b in glob.glob(f'{rd}/lib64/bionic/*.so')}
+
+    def provider(n):
+        """(path or None, origin) of the library a vendor process would load for NEEDED n."""
+        if n in lenlib:
+            return lenlib[n], 'lenovo'
+        if n in vndk:
+            return vndk[n], 'vndk'
+        if n in llndk:
+            p = bionic.get(n) or (f'{M}/xm_system/system/lib64/{n}'
+                                  if os.path.exists(f'{M}/xm_system/system/lib64/{n}') else None)
+            return p, 'llndk'
+        if n in ylib:
+            return ylib[n], 'yupei'
+        return None, 'missing'
+
+    exported_bionic = set()
+    for b in bionic.values():
+        exported_bionic |= nm(b, False)
+
+    for r in roots:
+        p = f'{M}/xm_vendor/{r}'
+        if not os.path.exists(p):
+            print(f'{r}: not in yupei vendor')
+            failed = True
+            continue
+        pulled, missing, unreadable, seen, todo = [], [], [], set(), needed(p)
+        objs, provs = [p], {}
+        while todo:
+            n = todo.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            q, origin = provider(n)
+            if origin == 'missing':
+                missing.append(n)
+                continue
+            if not q:
+                unreadable.append(n)      # an LLNDK name without a file to read here
+                continue
+            provs[n] = q
+            if origin == 'yupei':
+                pulled.append(n)
+                objs.append(q)
+            todo += needed(q)             # keep walking through every provider
+        exported = set(exported_bionic)
+        for q in provs.values():
+            exported |= nm(q, False)
+        for o in objs:
+            exported |= nm(o, False)
+        und = set()
+        for o in objs:
+            und |= nm(o, True)
+        miss = sorted(und - exported)
+        failed |= bool(missing or miss)
+        print(f'{r}\n   from yupei: {sorted(pulled)}\n   UNRESOLVED libraries: {sorted(missing)}'
+              + (f'\n   not checked (no file): {sorted(unreadable)}' if unreadable else '')
+              + f'\n   {len(objs)} objects, {len(und)} strong undefined symbols, unresolved {len(miss)} {miss[:12]}')
+finally:
+    for d in reversed(mounted):
+        if subprocess.run(['umount', d]).returncode:
+            print(f'could not umount {d}; leaving {t}', file=sys.stderr)
+            break
+    else:
+        shutil.rmtree(t, ignore_errors=True)
+sys.exit(1 if failed else 0)

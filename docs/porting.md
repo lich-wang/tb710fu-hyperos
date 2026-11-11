@@ -27,10 +27,10 @@
 
 | 检查 | 结果 | 怎么查 |
 |---|---|---|
-| vendor target-level | 8（`vendor/etc/vintf/manifest_pineapple.xml`，SM8650 的 SKU） | `vintf_check.py` |
-| 框架支持的 FCM | 7、8、202404、202504、202604 | 同上 |
-| 原厂 vendor 的 `android.*` HAL 版本是否被 FCM 8 接受 | 29/29 | 同上 |
-| 原厂 vendor 的设备兼容性矩阵要求的框架服务 | 缺 HIDL 的 `android.frameworks.sensorservice@1.0`、`android.hidl.memory`（Android 17 已去掉 HIDL 版本）；只影响 OTA 时的 VINTF 校验，开机不检查（推测，待真机） | 同上 |
+| vendor target-level | 8（`vendor/etc/vintf/manifest_pineapple.xml`，SM8650 的 SKU） | `vintf_check.py mnt len_ xm_`，第 1 项 |
+| 框架支持的 FCM | 7、8、202404、202504、202604 | 同一条命令，第 1 项（`xm_system/system/etc/vintf/compatibility_matrix.*.xml`） |
+| 原厂 vendor 的 `android.*` HAL 版本是否被 FCM 8 接受 | 29/29 | 同一条命令，第 2 项 |
+| 原厂 vendor 的设备兼容性矩阵要求的框架服务 | 缺 HIDL 的 `android.frameworks.sensorservice@1.0`、`android.hidl.memory`（Android 17 已去掉 HIDL 版本）；只影响 OTA 时的 VINTF 校验，开机不检查（推测，待真机） | 同一条命令，第 3 项（`len_vendor/etc/vintf/compatibility_matrix.xml` 对 yupei 的 system / system_ext / product manifest） |
 | SELinux：原厂 vendor + yupei 框架 | **编译通过**（不加补丁） | `sepolicy_compile.sh len_` |
 | SELinux：移植包 vendor + yupei 框架 | 不加补丁失败（`vendor_sepolicy.cil:18860`），加 `sepolicy_compat.cil` 才通过，和平板现状一致，可以作为对照 | `sepolicy_compile.sh port_ …` |
 | VNDK v34 | yupei `system_ext/apex/com.android.vndk.v34.apex` | — |
