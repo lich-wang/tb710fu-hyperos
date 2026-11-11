@@ -24,6 +24,45 @@ def parse_printgpt(text, sector=SECTOR):
     return parts
 
 
+def parse_lun_sectors(text):
+    """{lun: total sectors} from the 'Total disk size:..., sectors:0x...' line after each LUN in `edl printgpt`."""
+    out, lun = {}, None
+    for line in text.splitlines():
+        m = re.match(r'\s*Parsing Lun (\d+):', line)
+        if m:
+            lun = int(m.group(1))
+            continue
+        m = re.search(r'Total disk size:\s*0x[0-9a-f]+,\s*sectors:\s*0x([0-9a-f]+)', line, re.I)
+        if m and lun is not None:
+            out[lun] = int(m.group(1), 16)
+    return out
+
+
+def gpt_header(blob, sector=SECTOR):
+    """Primary GPT header fields from the first sectors of a LUN (MBR + header + entries)."""
+    h = blob[sector:sector + 92]
+    if h[:8] != b'EFI PART':
+        raise ValueError('没有 GPT 头（EFI PART）')
+    alt, first_use, last_use = struct.unpack_from('<QQQ', h, 32)
+    entries_lba, n, size = struct.unpack_from('<QII', h, 72)
+    return {'alternate_lba': alt, 'entries_lba': entries_lba, 'entries': n, 'entry_size': size,
+            'entries_sectors': (n * size + sector - 1) // sector, 'last_usable': last_use}
+
+
+def gpt_partitions(blob, sector=SECTOR):
+    """{name: (first_lba, sectors)} from a primary GPT dump (gpt_main*.bin of a backup or a 9008 package)."""
+    h = gpt_header(blob, sector)
+    out = {}
+    for i in range(h['entries']):
+        e = blob[h['entries_lba'] * sector + i * h['entry_size']:][:h['entry_size']]
+        if len(e) < 128 or e[:16] == b'\0' * 16:
+            continue
+        first, last = struct.unpack_from('<QQ', e, 32)
+        name = e[56:128].decode('utf-16-le', errors='replace').split('\0')[0]
+        out[name] = (first, last - first + 1)
+    return out
+
+
 def ab_state(flags):
     b = (flags >> 48) & 0xFF
     return {'active': bool(b & AB_ACTIVE), 'successful': bool(b & AB_SUCCESSFUL),

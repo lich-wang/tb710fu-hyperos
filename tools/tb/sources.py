@@ -93,6 +93,7 @@ class EdlSource:
         out = self.edl('printgpt', ok=r'Parsing Lun 0')
         self.sahara = layout.sahara_info(out)
         self.parts = layout.parse_printgpt(out)
+        self.luns = layout.parse_lun_sectors(out)
         if 'super' not in self.parts:
             raise SourceError('GPT 里没有 super 分区，不像是 TB710FU')
         self.slot = layout.active_slot(self.parts)
@@ -103,8 +104,9 @@ class EdlSource:
         if args[0] != 'reset':          # edl's reset command does not accept --memory
             cmd.append('--memory=ufs')
         try:
+            # edl writes edl_config.json into its working directory: keep it out of the repository
             p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace',
-                               timeout=1800)
+                               timeout=1800, cwd=os.path.dirname(os.path.abspath(self.logfile)))
         except FileNotFoundError:
             raise SourceError('找不到 edl。安装 bkerler/edl（pip install edlclient），或用 $EDL 指定。')
         out = p.stdout
@@ -132,6 +134,13 @@ class EdlSource:
                 with open(f, 'rb') as fh:
                     out[n] = fh.read()
             return out
+
+    def read_to_files(self, names, files):
+        """Whole partitions by name straight into files (one edl run; names must be unique across LUNs)."""
+        self.edl('r', ','.join(names), ','.join(files))
+
+    def read_sectors(self, lun, start, count, path):
+        self.edl('rs', start, count, path, f'--lun={lun}')
 
     def read_range(self, name, offset, length):
         p = self.parts[name]

@@ -42,6 +42,26 @@ python3 tools/tb710fu.py check 固件文件夹/.zip/.7z/镜像  # 离线：官�
 联想公告 LEN-221035（CVE-2026-92777）只能用来推断：海外版 TB710FU **低于 ZUI 17.5.04.059** 的属于受影响版本（测试密钥）；国行 ZUXOS 不在公告里，只能实际读 abl。
 ZUXOS 1.5.04.495 免解锁补充包里的 `abl.img`（sha256 `6cfa16e6…`）带联想签名证书，内置的就是 `testkey_rsa4096`。
 
+### 完整备份与取出联想原厂组件
+
+```bash
+python3 tools/tb710fu.py backup                     # 9008 只读完整备份，断了重跑会接着读
+python3 tools/tb710fu.py pull                       # 从最新的完整备份取件（没有就先备份）
+python3 tools/tb710fu.py pull --package 包.zip|.7z|文件夹   # 平板已不是原厂系统时：从联想官方 9008 包取件
+```
+
+- **backup**：
+  - 读全部 LUN 的 GPT（主表和备份表），以及除 `userdata` 外的所有分区，存到 `work/backup/<芯片序列号>-<时间>/`；
+  - 超过 4 GiB 的非系统分区（例如装了 Linux 后的根分区）会跳过，并列出原因；
+  - 每读完一步就保存进度，super 按 1 GiB 一段读；
+  - 结束时写 `SHA256SUMS`。里面有唯一数据分区，要另外存一份。
+- **pull**：取出当前槽的组件，放到 `work/lenovo/…/`，并写一份 `lenovo.json`（sha256、build 指纹、AVB 签名和回滚索引）。
+  - 取哪些：vendor、odm、vendor_dlkm、system_dlkm（system、system_ext、product 留作参考），以及启动链 boot、init_boot、vendor_boot、dtbo、recovery、vbmeta、vbmeta_system。
+  - 原厂判断：只有 vendor 指纹以 `Lenovo/` 开头才算原厂，不是就拒绝。
+- **官方包**：
+  - 按 `rawprogram*.xml` 把 super 的各段（sparse 或 raw）拼回去，起点用包里的 `gpt_main0.bin` 定位；
+  - 包里的底层固件会逐个和设备档案比对，版本不一致时提示兼容风险。本项目不写底层固件。
+
 ## 9008（EDL）
 
 - 进入：`adb reboot edl`（需 root 或在 Android 下），或者拔线 → 长按电源 15–20 s 关机 → 按住音量+和音量−插线。
