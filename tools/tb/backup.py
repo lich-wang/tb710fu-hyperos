@@ -7,7 +7,7 @@ Layout of a backup directory (work/backup/<chip serial>-<time>/):
 The state is saved after every step, so an interrupted backup continues where it stopped (same device,
 same partition table). super is read in 1 GiB pieces for the same reason.
 """
-import hashlib, json, os, re, shutil, time
+import hashlib, json, os, re, shutil, stat, time
 
 from . import layout
 from .sources import WORK, SourceError
@@ -47,6 +47,8 @@ def plan(src):
             continue
         if n in SKIP:
             skipped.append((n, p['bytes'], '用户数据'))
+        elif not ITEM_NAME.match(f'{n}.bin'):
+            skipped.append((n, p['bytes'], '分区名不能当文件名'))
         elif p['bytes'] >= BIG and n != 'super':
             skipped.append((n, p['bytes'], '超过 4 GiB，不是安卓系统分区'))
         else:
@@ -82,26 +84,61 @@ def find_resumable(src):
     return None
 
 
-ITEM_NAME = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.-]*\.bin$')   # what run() writes: <partition>.bin, gpt_*.bin
+# A file name run() may write: <partition>.bin / gpt_*.bin. Any GPT name is allowed except path separators, NUL
+# and a leading dot, so generation (plan) and validation (backup.json read back) use the same rule.
+ITEM_NAME = re.compile(r'^[^/\\\0.][^/\\\0]*\.bin$')
 
 
 def check_item_names(d, items):
     """backup.json is read back from disk: every recorded name must be a plain file name inside d."""
-    root = os.path.realpath(d)
     for name in items:
-        if not ITEM_NAME.match(name) or os.path.dirname(os.path.realpath(os.path.join(d, name))) != root:
+        if not ITEM_NAME.match(name):
             raise SourceError(f'{d}/backup.json 里有不合法的文件名 {name!r}，不使用这个备份')
 
 
-def verify_items(d, items, hashes=True):
-    """Names of recorded files that are missing, have the wrong size or (hashes=True) the wrong sha256."""
+def _open_dir(d):
+    """File descriptor of backup directory d: later opens / unlinks are relative to it, so replacing d between
+    the check and the action cannot redirect them."""
+    try:
+        # resolve once (a backup folder may legitimately be a symlink), then pin that directory
+        return os.open(os.path.realpath(d), os.O_RDONLY | os.O_DIRECTORY | getattr(os, 'O_NOFOLLOW', 0))
+    except OSError as e:
+        raise SourceError(f'打不开备份目录 {d}：{e}')
+
+
+def _item_ok(dfd, name, v, hashes):
+    try:
+        fd = os.open(name, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0), dir_fd=dfd)
+    except OSError:
+        return False
+    with os.fdopen(fd, 'rb') as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_size != v['bytes']:
+            return False
+        if not hashes:
+            return True
+        h = hashlib.sha256()
+        for b in iter(lambda: f.read(1 << 22), b''):
+            h.update(b)
+        return h.hexdigest() == v['sha256']
+
+
+def verify_items(d, items, hashes=True, remove_bad=False):
+    """Names of recorded files that are missing, have the wrong size or (hashes=True) the wrong sha256.
+    remove_bad=True also deletes those files (through the same directory descriptor)."""
     check_item_names(d, items)
-    bad = []
-    for name, v in sorted(items.items()):
-        p = os.path.join(d, name)
-        if not os.path.isfile(p) or os.path.getsize(p) != v['bytes'] or (hashes and file_sha256(p) != v['sha256']):
-            bad.append(name)
-    return bad
+    dfd = _open_dir(d)
+    try:
+        bad = [name for name, v in sorted(items.items()) if not _item_ok(dfd, name, v, hashes)]
+        if remove_bad:
+            for name in bad:
+                try:
+                    os.unlink(name, dir_fd=dfd)
+                except FileNotFoundError:
+                    pass
+        return bad
+    finally:
+        os.close(dfd)
 
 
 def _private_dir(path):
@@ -144,12 +181,10 @@ def run(src, dest=None, ident=None, resume=True):
         if not same_device(st, src):    # only reachable with an explicit --out
             print('  ⚠ 这次没读到芯片序列号，核对不了是不是同一台平板；你指定了这个目录，按同一台处理')
         print('  核对已经读好的文件 …', flush=True)
-        bad = verify_items(dest, st['items'])
+        bad = verify_items(dest, st['items'], remove_bad=True)
         for name in bad:
             print(f'  {name} 丢失或和记录不符，重新读')
             del st['items'][name]
-            if os.path.exists(os.path.join(dest, name)):
-                os.remove(os.path.join(dest, name))
     else:
         st = {'schema': 1, 'created': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'device': dict(src.sahara),
               'slot': src.slot, 'luns': src.luns, 'table': _table(src), 'items': {}, 'complete': False,

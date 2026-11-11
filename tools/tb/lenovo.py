@@ -134,9 +134,13 @@ def fresh_dir(path, source):
     """Empty output directory, so files of an earlier extraction never count as this one's.
 
     Refuses when the input (package or backup) is that directory or inside it."""
-    out, src = os.path.realpath(path), os.path.realpath(source)
-    if src == out or src.startswith(out + os.sep):
-        raise SourceError(f'输入 {source} 在输出目录 {path} 里，清空它会删掉输入：把输入放到别处')
+    inside = lambda a, b: a == b or a.startswith(b + os.sep)     # a is b or below b
+    for out, src in ((os.path.realpath(path), os.path.realpath(source)),
+                     (os.path.abspath(path), os.path.abspath(source))):   # as given too: symlinks in the input path
+        if inside(src, out):
+            raise SourceError(f'输入 {source} 在输出目录 {path} 里，清空它会删掉输入：把输入放到别处')
+        if os.path.isdir(source) and inside(out, src):
+            raise SourceError(f'输出目录 {path} 在输入文件夹 {source} 里，清空它可能删掉输入：把输入放到别处')
     if os.path.isdir(path):
         shutil.rmtree(path)
     os.makedirs(path)
