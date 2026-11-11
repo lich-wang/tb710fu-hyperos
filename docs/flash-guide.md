@@ -68,6 +68,19 @@ yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包（Android 17，9922261403 字节；文
 （小米 OTA 服务器的新加坡存储桶；`bigota.d.miui.net` 上同名路径，2026-11 时 HTTPS 证书不匹配）。
 国行 yupei 之后还有 4.0.10–4.0.12（2026-11-03），本项目验证过的只有 4.0.5.0。大文件建议用 `aria2c -c -x 16 -s 16 <地址>`。
 
+新流程导入这个包（只用 Python 标准库，不需要 payload-dumper-go）：
+
+```bash
+python3 tools/tb710fu.py import yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip
+```
+
+- **校验**：
+  - 机型必须是 yupei，而且必须是 A/B 全量包（增量包会被拒绝）；
+  - 版本按 OTA 的 post-build 指纹认定，没验证过的版本要加 `--force`；
+  - 先用 `payload_properties.txt` 里的 sha256 校验整个 payload.bin，解出的每个分区再和 manifest 里的 sha256 核对。
+- **输出**：解出 system、system_ext、product、mi_ext、vendor、odm 到 `work/xiaomi/<版本>/`，附 `xiaomi.json`。
+- 8 核机器上约 1 分钟。线刷包（`.tgz`）还不支持。
+
 ## 1. 进入 9008 并完整备份 ✅
 
 进 9008：关机拔线 → 长按电源 15–20 秒确保关机 → **按住音量+ 和音量−** 插线。Mac 上 `system_profiler SPUSBDataType` 能看到
