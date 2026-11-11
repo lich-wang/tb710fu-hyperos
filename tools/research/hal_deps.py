@@ -3,8 +3,9 @@
 usage: sudo python3 hal_deps.py MNT   (len_/xm_ mounts, see mount.sh)
 Resolves NEEDED transitively (through every provider: Lenovo vendor/odm, VNDK v34 apex, LLNDK/system, and
 libraries only yupei has, which are pulled in and listed), then checks every strong undefined dynamic symbol of
-the yupei objects against what the resolved providers export (bionic from the runtime apex). Weak undefined
-symbols may stay unresolved and are not reported. A failing readelf / nm stops the script."""
+the yupei objects against what that object's resolved providers export (bionic libraries only when they are
+in its NEEDED closure, from the runtime apex). Weak undefined symbols may stay unresolved and are not reported.
+A failing readelf / nm stops the script; a dependency that cannot be read counts as a failure."""
 import glob, os, re, shutil, subprocess, sys, tempfile, zipfile
 
 M = sys.argv[1]
@@ -87,10 +88,6 @@ try:
             return ylib[n], 'yupei'
         return None, 'missing'
 
-    exported_bionic = set()
-    for b in bionic.values():
-        exported_bionic |= nm(b, False)
-
     for r in roots:
         p = f'{M}/xm_vendor/{r}'
         if not os.path.exists(p):
@@ -116,7 +113,7 @@ try:
                 pulled.append(n)
                 objs.append(q)
             todo += needed(q)             # keep walking through every provider
-        exported = set(exported_bionic)
+        exported = set()
         for q in provs.values():
             exported |= nm(q, False)
         for o in objs:
@@ -125,9 +122,9 @@ try:
         for o in objs:
             und |= nm(o, True)
         miss = sorted(und - exported)
-        failed |= bool(missing or miss)
+        failed |= bool(missing or miss or unreadable)
         print(f'{r}\n   from yupei: {sorted(pulled)}\n   UNRESOLVED libraries: {sorted(missing)}'
-              + (f'\n   not checked (no file): {sorted(unreadable)}' if unreadable else '')
+              + (f'\n   NOT CHECKED (no file to read): {sorted(unreadable)}' if unreadable else '')
               + f'\n   {len(objs)} objects, {len(und)} strong undefined symbols, unresolved {len(miss)} {miss[:12]}')
 finally:
     for d in reversed(mounted):

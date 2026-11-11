@@ -1,17 +1,25 @@
 """VINTF checks behind docs/porting.md (offline, on the mounts of mount.sh).
 
-usage: sudo python3 vintf_check.py MNT VENDOR_PREFIX FRAMEWORK_PREFIX
-  e.g. vintf_check.py mnt len_ xm_
+usage: sudo python3 vintf_check.py MNT VENDOR_PREFIX FRAMEWORK_PREFIX [VENDOR_SKU [ODM_SKU]]
+  e.g. vintf_check.py mnt len_ xm_ pineapple
+Manifests are chosen like libvintf: vendor/etc/vintf/manifest_<VENDOR_SKU>.xml (ro.boot.product.vendor.sku) or else
+manifest.xml, odm/etc/vintf/manifest_<ODM_SKU>.xml (ro.boot.product.hardware.sku) or else manifest.xml, plus the
+manifest/*.xml fragments of each. With several SKU manifests and no SKU given the script stops.
+
 Prints, for the vendor of VENDOR_PREFIX against the framework (system / system_ext / product) of FRAMEWORK_PREFIX:
   1. the vendor's target FCM level and the FCM levels the framework ships matrices for;
-  2. whether every android.* HAL in the vendor manifests is accepted by the framework matrix of that level;
-  3. which HALs the vendor's device compatibility matrix requires that no framework manifest provides.
-Version rule (AOSP): a matrix range "2.5-7" (HIDL) accepts 2.5 and any later minor of major 2, "5-7" (AIDL)
-accepts 5 or later; the upper end is what the framework may ask for, not a limit on what the vendor provides."""
+  2. android.* HALs of the vendor manifest that the framework matrix of that level does not accept, and HALs that
+     matrix requires (optional="false") but the vendor manifest does not serve;
+  3. HALs the vendor's device compatibility matrix requires that the framework manifests do not serve.
+Requirements are matched per interface and instance (regex-instance too). Version rule (AOSP): a range "2.5-7"
+(HIDL) accepts 2.5 and any later minor of major 2, "5-7" (AIDL) accepts 5 or later; the upper end is what the
+framework may ask for, not a limit on what the vendor provides. Exit status 1 when any check finds a problem."""
 import glob, os, re, sys
 import xml.etree.ElementTree as ET
 
 M, V, F = sys.argv[1:4]
+VSKU = sys.argv[4] if len(sys.argv) > 4 else None
+OSKU = sys.argv[5] if len(sys.argv) > 5 else None
 FV = f'{F}system/system/etc/vintf'
 
 
@@ -22,34 +30,40 @@ def files(*g):
     return o
 
 
-def hals_of(paths, only_android=False):
-    """{(format, name): {(version, file)}} from manifest files."""
-    out = {}
+def pick(d, sku, what):
+    """manifest_<sku>.xml or manifest.xml of directory d (relative to M), plus its fragments."""
+    skus = [os.path.basename(p)[9:-4] for p in files(f'{d}/manifest_*.xml')]
+    if sku:
+        main = files(f'{d}/manifest_{sku}.xml') or files(f'{d}/manifest.xml')
+    elif len(skus) > 1:
+        sys.exit(f'{d} has manifests for SKUs {skus}: give the {what} SKU')
+    else:
+        main = files(f'{d}/manifest_*.xml') or files(f'{d}/manifest.xml')
+    return main + files(f'{d}/manifest/*.xml')
+
+
+# ---------------------------------------------------------------- manifests: what is served
+
+def entries(paths):
+    """[(format, name, version, interface, instance)] served by these manifests."""
+    out = []
     for f in paths:
-        r = ET.parse(f).getroot()
-        for h in r.iter('hal'):
+        for h in ET.parse(f).getroot().iter('hal'):
             fmt, name = h.get('format', 'hidl'), h.findtext('name', '').strip()
-            if only_android and not name.startswith('android.'):
-                continue
-            vers = [v.text.strip() for v in h.findall('version')]
-            vers += [re.match(r'@([\d.]+)', q.text.strip()).group(1) for q in h.iter('fqname')
-                     if q.text.strip().startswith('@')]
-            if fmt == 'aidl' and not vers:
-                vers = ['1']
-            for v in vers or ['']:
-                out.setdefault((fmt, name), set()).add((v, os.path.basename(f)))
+            vers = [v.text.strip() for v in h.findall('version')] or (['1'] if fmt == 'aidl' else [''])
+            for q in h.iter('fqname'):
+                s = q.text.strip()
+                m = re.fullmatch(r'@([\d.]+)::(\w+)/(.+)', s) or re.fullmatch(r'(?:@(\d+)::)?(\w+)/(.+)', s)
+                if m:
+                    out.append((fmt, name, m.group(1) or vers[0], m.group(2), m.group(3)))
+            for i in h.findall('interface'):
+                for inst in i.findall('instance'):
+                    for v in vers:
+                        out.append((fmt, name, v, i.findtext('name', '').strip(), inst.text.strip()))
+            if not h.findall('fqname') and not h.findall('interface'):
+                for v in vers:
+                    out.append((fmt, name, v, None, None))
     return out
-
-
-def vendor_manifests():
-    return files(f'{V}vendor/etc/vintf/manifest.xml', f'{V}vendor/etc/vintf/manifest_*.xml',
-                 f'{V}vendor/etc/vintf/manifest/*.xml', f'{V}odm/etc/vintf/manifest*.xml', f'{V}odm/etc/vintf/manifest/*.xml')
-
-
-def framework_manifests():
-    return files(f'{FV}/manifest.xml', f'{FV}/manifest/*.xml', f'{F}system_ext/etc/vintf/manifest.xml',
-                 f'{F}system_ext/etc/vintf/manifest/*.xml', f'{F}product/etc/vintf/manifest.xml',
-                 f'{F}product/etc/vintf/manifest/*.xml')
 
 
 def target_level(paths):
@@ -59,65 +73,98 @@ def target_level(paths):
     return level
 
 
+# ---------------------------------------------------------------- matrices: what is required
+
 def matrix(path):
-    """{(format, name): [version ranges]} of a compatibility matrix, plus the HALs marked optional="false"."""
-    out, required = {}, set()
+    """[{fmt, name, ranges, optional, needs: [(interface, instance, is_regex)]}]"""
+    out = []
     for h in ET.parse(path).getroot().iter('hal'):
-        fmt, name = h.get('format', 'hidl'), h.findtext('name', '').strip()
-        vs = [v.text.strip() for v in h.findall('version')] or (['1'] if fmt == 'aidl' else [])
-        out.setdefault((fmt, name), []).extend(vs)
-        if h.get('optional', 'false') == 'false':
-            required.add((fmt, name))
-    return out, required
+        fmt = h.get('format', 'hidl')
+        ranges = [v.text.strip() for v in h.findall('version')] or (['1'] if fmt == 'aidl' else [])
+        needs = []
+        for i in h.findall('interface'):
+            n = i.findtext('name', '').strip()
+            needs += [(n, x.text.strip(), False) for x in i.findall('instance')]
+            needs += [(n, x.text.strip(), True) for x in i.findall('regex-instance')]
+        out.append({'fmt': fmt, 'name': h.findtext('name', '').strip(), 'ranges': ranges,
+                    'optional': h.get('optional', 'false') != 'false', 'needs': needs})
+    return out
 
 
 def accepts(fmt, v, ranges):
+    if not ranges:
+        return True
     for r in ranges:
         lo = r.partition('-')[0]
-        if fmt == 'aidl':
-            if int(v) >= int(lo):
-                return True
-        else:
-            vm, vn = map(int, v.split('.'))
-            lm, ln = map(int, lo.split('.'))
-            if vm == lm and vn >= ln:
-                return True
+        try:
+            if fmt == 'aidl':
+                if int(v) >= int(lo):
+                    return True
+            else:
+                vm, vn = map(int, v.split('.'))
+                lm, ln = map(int, lo.split('.'))
+                if vm == lm and vn >= ln:
+                    return True
+        except ValueError:
+            continue
     return False
 
 
-vm = vendor_manifests()
+def unmet(req, served):
+    """Requirements of one matrix HAL that no served entry satisfies -> [str]."""
+    mine = [e for e in served if e[0] == req['fmt'] and e[1] == req['name'] and accepts(e[0], e[2], req['ranges'])]
+    if not req['needs']:
+        return [] if mine else [f'{req["name"]} {req["ranges"]}']
+    bad = []
+    for iface, inst, rx in req['needs']:
+        ok = any(e[3] == iface and e[4] is not None and (re.fullmatch(inst, e[4]) if rx else e[4] == inst)
+                 for e in mine)
+        if not ok:
+            bad.append(f'{req["fmt"]} {req["name"]} {req["ranges"]} {iface}/{inst}{" (regex)" if rx else ""}')
+    return bad
+
+
+problems = 0
+vm = pick(f'{V}vendor/etc/vintf', VSKU, 'vendor') + pick(f'{V}odm/etc/vintf', OSKU, 'odm')
 level = target_level(vm)
 names = [os.path.basename(p) for p in files(f'{FV}/compatibility_matrix.*.xml')]
 levels = [re.match(r'compatibility_matrix\.(\w+)\.xml$', n).group(1) for n in names
           if re.match(r'compatibility_matrix\.\w+\.xml$', n) and 'device' not in n]
 levels.sort(key=lambda s: (not s.isdigit(), int(s) if s.isdigit() else 0, s))
+print(f'vendor manifests: {", ".join(os.path.relpath(p, M) for p in vm)}')
 print(f'1. {V}vendor target-level {level}; {F} framework FCM levels: {", ".join(levels)}')
 if level not in levels:
-    print(f'   target-level {level} is not among the framework matrices')
+    sys.exit(f'   target-level {level} is not among the framework matrices')
 
-vh = hals_of(vm, only_android=True)
-fm, _ = matrix(os.path.join(M, FV, f'compatibility_matrix.{level}.xml'))
-bad = 0
-for k, vs in sorted(vh.items()):
-    if k not in fm:
-        print('   NOT IN FCM', k, sorted(vs))
-        bad += 1
-        continue
-    for v, f in sorted(vs):
-        if not accepts(k[0], v, fm[k]):
-            print('   VERSION', k, v, 'FCM', fm[k], f)
-            bad += 1
-print(f'2. vendor android.* HALs accepted by FCM {level}: {len(vh) - bad}/{len(vh)}')
+served = entries(vm)
+fcm = matrix(os.path.join(M, FV, f'compatibility_matrix.{level}.xml'))
+by_name = {}
+for r in fcm:
+    by_name.setdefault((r['fmt'], r['name']), []).extend(r['ranges'])
+android = sorted({(e[0], e[1], e[2]) for e in served if e[1].startswith('android.')})
+hals = sorted({(f, n) for f, n, _ in android})
+rejected = []
+for f, n, v in android:
+    if (f, n) not in by_name:
+        rejected.append(f'{f} {n} {v}: not in FCM {level}')
+    elif not accepts(f, v, by_name[(f, n)]):
+        rejected.append(f'{f} {n} {v}: FCM {level} has {by_name[(f, n)]}')
+missing_fcm = [m for r in fcm if not r['optional'] for m in unmet(r, served)]
+bad_hals = {tuple(x.split()[:2]) for x in rejected}
+print(f'2. vendor android.* HALs accepted by FCM {level}: {len(hals) - len(bad_hals)}/{len(hals)}; '
+      f'required by FCM {level} but not served by the vendor: {len(missing_fcm)}')
+for x in rejected + missing_fcm:
+    print('  ', x)
+problems += len(rejected) + len(missing_fcm)
 
-dcm = files(f'{V}vendor/etc/vintf/compatibility_matrix.xml', f'{V}odm/etc/vintf/compatibility_matrix.xml')
-fh = hals_of(framework_manifests())
-missing = []
-for path in dcm:
-    req_m, required = matrix(path)
-    for k in sorted(required):
-        have = {v for v, _ in fh.get(k, set())}
-        if not have or (req_m[k] and not any(accepts(k[0], v, req_m[k]) for v in have if v)):
-            missing.append((k, req_m[k], sorted(have)))
-print(f'3. HALs the vendor device matrix requires that the framework manifests do not provide: {len(missing)}')
-for k, want, have in missing:
-    print('  ', k, 'wants', want, 'framework has', have or '-')
+fw = entries(files(f'{FV}/manifest.xml', f'{FV}/manifest/*.xml', f'{F}system_ext/etc/vintf/manifest.xml',
+                   f'{F}system_ext/etc/vintf/manifest/*.xml', f'{F}product/etc/vintf/manifest.xml',
+                   f'{F}product/etc/vintf/manifest/*.xml'))
+missing_fw = []
+for path in files(f'{V}vendor/etc/vintf/compatibility_matrix.xml', f'{V}odm/etc/vintf/compatibility_matrix.xml'):
+    missing_fw += [m for r in matrix(path) if not r['optional'] for m in unmet(r, fw)]
+print(f'3. required by the vendor device matrix but not served by the framework manifests: {len(missing_fw)}')
+for x in missing_fw:
+    print('  ', x)
+problems += len(missing_fw)
+sys.exit(1 if problems else 0)
