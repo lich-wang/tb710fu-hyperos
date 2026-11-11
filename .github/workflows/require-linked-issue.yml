@@ -1,0 +1,67 @@
+name: Require Linked Issue
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  require-linked-issue:
+    name: require-linked-issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the pull request is linked to an issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+
+            // 1) GitHub 原生「Closing issues」关联：Closes / Fixes / Resolves #N
+            try {
+              const res = await github.graphql(
+                `query($owner:String!, $repo:String!, $number:Int!) {
+                   repository(owner:$owner, name:$repo) {
+                     pullRequest(number:$number) {
+                       closingIssuesReferences(first:10) { nodes { number title } }
+                     }
+                   }
+                 }`,
+                { owner, repo, number: pr.number }
+              );
+              const linked = res.repository.pullRequest?.closingIssuesReferences?.nodes ?? [];
+              if (linked.length > 0) {
+                core.info(`Linked issues: ${linked.map(i => '#' + i.number).join(', ')}`);
+                return;
+              }
+            } catch (e) {
+              core.warning(`closingIssuesReferences lookup failed: ${e.message}`);
+            }
+
+            // 2) 兜底：标题或正文中引用了本仓库真实存在的 Issue
+            const text = `${pr.title || ''}\n${pr.body || ''}`;
+            const refs = [...new Set(
+              [...text.matchAll(/(?:^|[^\w])#(\d+)/g)].map(m => Number(m[1]))
+            )];
+            for (const n of refs) {
+              try {
+                const { data } = await github.rest.issues.get({
+                  owner, repo, issue_number: n
+                });
+                if (data && !data.pull_request) {
+                  core.info(`Linked via reference #${n}: ${data.title}`);
+                  return;
+                }
+              } catch (e) {
+                if (e.status !== 404) core.warning(`Issue #${n} lookup failed: ${e.message}`);
+              }
+            }
+
+            core.setFailed(
+              'PR 未关联任何 Issue。请在描述中写 Closes #<issue号>（也可用 Fixes / Resolves），' +
+              '或先创建 Issue 并在描述中引用 #<issue号>。示例：Closes #12'
+            );

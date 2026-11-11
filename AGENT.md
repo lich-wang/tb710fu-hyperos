@@ -79,3 +79,39 @@
 
 每完成一个阶段，告诉用户：做了什么（写了哪些分区、校验结果）、检查点是否通过、下一步需要他做什么。
 出错时给出原始错误输出的关键几行，说明你的判断（标明是否推测）和你建议的处理，等用户决定。
+
+---
+
+## 七、给本仓库提改动的 Agent：研发规范
+
+以上各节是刷机规程。如果你的任务是**修改本仓库**（代码、文档、CI），另外遵守下面这些。
+
+### 分支与 PR
+- `main` 受保护：不直接推送，不强推，不删除。所有改动走「Issue → 特性分支 → PR → 合并」。
+- 先开 Issue 说明要做什么，再从最新的 `main` 拉分支，命名 `<类型>/<简短描述>`（如 `fix/super-verity`、`docs/flash-guide`、`chore/ci-cache`）。
+- PR 描述必须写 `Closes #<编号>`（或 `Fixes` / `Resolves`），否则 `require-linked-issue` 检查失败，PR 无法合并。
+- 一个 PR 只做一件事；合并用 `gh pr merge --squash --delete-branch`。
+- 克隆后执行一次 `git config core.hooksPath .githooks`，启用本地防误推钩子（拦截推送到 `main`/`master`）。
+
+### CodeRabbit 质量门禁
+- 分支保护要求：必需检查 `require-linked-issue` 和 `CodeRabbit` 通过、分支与 `main` 同步、所有讨论已解决；管理员同样受约束。
+- `.coderabbit.yaml` 开了阻塞模式（`request_changes_workflow: true`）：CodeRabbit 发现问题时给出 **Request changes**，
+  问题全部修复、讨论全部 Resolve 之后才给 **Approve**。
+- 处理流程：逐条看 CodeRabbit 的评论 → 修复并推送（或在讨论里说明为什么不改）→ 把讨论标记为 Resolved →
+  等它对最新提交重新审查。
+- **`APPROVED` 与 `Success` 不是一回事**：`CodeRabbit` 检查显示 Success 只表示这次审查跑完了，不代表没有问题。
+  合并前确认 CodeRabbit 的最新 Review 是 `APPROVED`，**且针对的是 PR 当前的 head 提交**（之后又推送过的话，旧的批准不算数）：
+  ```bash
+  gh pr view <PR> --json headRefOid --jq .headRefOid
+  # --paginate 读完所有页（默认每页 30 条），最后一行就是 CodeRabbit 最新的 Review。
+  # pipefail：任何一页请求失败整条命令就失败，此时不要合并，重新查询。
+  set -o pipefail
+  gh api --paginate repos/{owner}/{repo}/pulls/<PR>/reviews \
+    --jq '.[] | select(.user.login == "coderabbitai[bot]") | "\(.state) \(.commit_id)"' | tail -n 1
+  ```
+  两者的提交号必须一致、`state` 为 `APPROVED`，并确认没有未解决的讨论。
+- 在评论里发 `@coderabbitai review` 若回复 “Already reviewed the last commit”，说明最新提交已经审过，直接按上一条查看 Review 状态。
+
+### 红线
+- 不绕过门禁：不用管理员权限强制合并，不临时关掉分支保护或必需检查，不改 `.coderabbit.yaml` 来让审查“通过”。
+- CodeRabbit 没有 `APPROVED`、或还有未解决的讨论时，**不得向用户汇报“已完成”**；如实说明卡在哪里。
