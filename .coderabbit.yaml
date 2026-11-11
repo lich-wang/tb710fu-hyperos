@@ -18,6 +18,7 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    auto_pause_after_reviewed_commits: 0  # 默认 5：之后的提交不再自动审查，批准就跟不上最新提交
 
 chat:
   auto_reply: true

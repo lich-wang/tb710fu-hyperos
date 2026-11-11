@@ -92,8 +92,13 @@
 - 处理流程：逐条看 CodeRabbit 的评论 → 修复并推送（或在讨论里说明为什么不改）→ 把讨论标记为 Resolved →
   等它对最新提交重新审查。
 - **`APPROVED` 与 `Success` 不是一回事**：`CodeRabbit` 检查显示 Success 只表示这次审查跑完了，不代表没有问题。
-  合并前用 `gh pr view <PR> --json latestReviews,reviewDecision` 确认 CodeRabbit 的最新 Review 是 `APPROVED`，
-  并确认没有未解决的讨论。
+  合并前确认 CodeRabbit 的最新 Review 是 `APPROVED`，**且针对的是 PR 当前的 head 提交**（之后又推送过的话，旧的批准不算数）：
+  ```bash
+  gh pr view <PR> --json headRefOid --jq .headRefOid
+  gh api repos/{owner}/{repo}/pulls/<PR>/reviews \
+    --jq '[.[] | select(.user.login == "coderabbitai[bot]")] | last | {state, commit_id}'
+  ```
+  两者的提交号必须一致、`state` 为 `APPROVED`，并确认没有未解决的讨论。
 - 在评论里发 `@coderabbitai review` 若回复 “Already reviewed the last commit”，说明最新提交已经审过，直接按上一条查看 Review 状态。
 
 ### 红线
