@@ -45,24 +45,33 @@ def pick(d, sku, what):
 # ---------------------------------------------------------------- manifests: what is served
 
 def entries(paths):
-    """[(format, name, version, interface, instance)] served by these manifests."""
+    """[(format, name, version, interface, instance)] served by these manifests, read in load order (vendor,
+    its fragments, odm, its fragments). A HAL with override="true" first removes the earlier declarations it
+    replaces, like libvintf: AIDL the same name, HIDL the same name and major version (all majors when it
+    declares no version, i.e. disables the HAL)."""
     out = []
     for f in paths:
         for h in ET.parse(f).getroot().iter('hal'):
             fmt, name = h.get('format', 'hidl'), h.findtext('name', '').strip()
             vers = [v.text.strip() for v in h.findall('version')] or (['1'] if fmt == 'aidl' else [''])
+            new = []
             for q in h.iter('fqname'):
                 s = q.text.strip()
                 m = re.fullmatch(r'@([\d.]+)::(\w+)/(.+)', s) or re.fullmatch(r'(?:@(\d+)::)?(\w+)/(.+)', s)
                 if m:
-                    out.append((fmt, name, m.group(1) or vers[0], m.group(2), m.group(3)))
+                    new.append((fmt, name, m.group(1) or vers[0], m.group(2), m.group(3)))
             for i in h.findall('interface'):
                 for inst in i.findall('instance'):
                     for v in vers:
-                        out.append((fmt, name, v, i.findtext('name', '').strip(), inst.text.strip()))
-            if not h.findall('fqname') and not h.findall('interface'):
+                        new.append((fmt, name, v, i.findtext('name', '').strip(), inst.text.strip()))
+            if not h.findall('fqname') and not h.findall('interface') and h.findall('version'):
                 for v in vers:
-                    out.append((fmt, name, v, None, None))
+                    new.append((fmt, name, v, None, None))
+            if h.get('override') == 'true':
+                majors = {e[2].split('.')[0] for e in new if e[2]}
+                out = [e for e in out if not (e[0] == fmt and e[1] == name and
+                                              (fmt == 'aidl' or not majors or e[2].split('.')[0] in majors))]
+            out += new
     return out
 
 
