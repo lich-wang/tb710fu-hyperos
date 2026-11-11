@@ -225,20 +225,22 @@ def import_ota(path, force=False):
         raise SourceError(f'输出目录 {out} 不在 {root} 里，拒绝导入')
     os.makedirs(root, exist_ok=True)
     # extract into a temporary folder and swap it in at the end: a failed import never damages a previous one
-    tmp = tempfile.mkdtemp(prefix=f'.{name}-', dir=root)
+    tmp = tempfile.mkdtemp(prefix=f'.{name}-new-', dir=root)
+    old = None      # our own hidden copy of the previous import (names starting with '.' are never versions)
     try:
         info = _extract_all(path, pay, meta, version, post, tmp)
-        old = out + '.old'
         if os.path.exists(out):
-            shutil.rmtree(old, ignore_errors=True)
+            old = tempfile.mkdtemp(prefix=f'.{name}-old-', dir=root)
+            os.rmdir(old)
             os.rename(out, old)
         os.rename(tmp, out)
-        shutil.rmtree(old, ignore_errors=True)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
-        if not os.path.exists(out) and os.path.exists(out + '.old'):
-            os.rename(out + '.old', out)              # put the previous import back
+        if old and not os.path.exists(out):
+            os.rename(old, out)                       # put the previous import back
         raise
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
     return out, info
 
 
