@@ -14,7 +14,7 @@ Every other file keeps its content and metadata.
 """
 import glob, hashlib, json, os, re, shutil, subprocess, tempfile, time
 
-from . import avb, layout
+from . import avb, layout, lenovo
 from .backup import file_sha256
 from .sources import WORK, SourceError
 
@@ -37,7 +37,7 @@ def fstab_add_erofs(text):
         if (len(f) >= 5 and not l.lstrip().startswith('#') and f[2] == 'ext4' and f[0] in LOGICAL
                 and 'logical' in f[4].split(',') and (f[1], 'erofs') not in have):
             # same column layout as the ext4 line: replace the type and the mount options
-            m = re.match(r'(\S+\s+\S+\s+)ext4(\s+)(\S+)(\s+)(.*)', l)
+            m = re.match(r'(\s*\S+\s+\S+\s+)ext4(\s+)(\S+)(\s+)(.*)', l)
             out.append(f'{m.group(1)}erofs{m.group(2)[:-1] or " "}{"ro".ljust(len(m.group(3)))}{m.group(4)}{m.group(5)}')
             added.append(f[0])
     return '\n'.join(out) + ('\n' if text.endswith('\n') else ''), added
@@ -157,10 +157,37 @@ def build(lenovo_dir=None):
     lenovo_dir = lenovo_dir or latest_lenovo()
     if not lenovo_dir or not os.path.exists(os.path.join(lenovo_dir, 'lenovo.json')):
         raise SourceError('没有联想原厂组件：先跑 tb710fu.py pull')
-    info = json.load(open(os.path.join(lenovo_dir, 'lenovo.json')))
-    out = os.path.join(WORK, 'build', 'vendor', os.path.basename(lenovo_dir.rstrip('/')))
-    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(lenovo_dir, 'lenovo.json')) as f:
+        info = json.load(f)
+    errs = lenovo.verdict(info)
+    if errs:
+        raise SourceError(f'{lenovo_dir} 不能用来构建：' + '；'.join(errs))
+    root = os.path.join(WORK, 'build', 'vendor')
+    name = os.path.basename(lenovo_dir.rstrip('/'))
+    out = os.path.join(root, name)
     print(f'vendor 侧：{lenovo_dir} → {out}')
+    os.makedirs(root, exist_ok=True)
+    # build in a temporary folder and swap it in at the end: a failed rebuild never damages the previous result
+    tmp = tempfile.mkdtemp(prefix=f'.{name}-new-', dir=root)
+    old = None
+    try:
+        res = _build(lenovo_dir, info, tmp)
+        if os.path.exists(out):
+            old = tempfile.mkdtemp(prefix=f'.{name}-old-', dir=root)
+            os.rmdir(old)
+            os.rename(out, old)
+        os.rename(tmp, out)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if old and not os.path.exists(out):
+            os.rename(old, out)
+        raise
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+    return out, res
+
+
+def _build(lenovo_dir, info, out):
     res = {'lenovo': lenovo_dir, 'lenovo_files': info.get('files', {}), 'images': {}}
     for n in PASS:
         src = os.path.join(lenovo_dir, f'{n}.img')
@@ -178,7 +205,7 @@ def build(lenovo_dir=None):
     res['created'] = time.strftime('%Y-%m-%dT%H:%M:%S%z')
     with open(os.path.join(out, 'vendor.json'), 'w') as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
-    return out, res
+    return res
 
 
 def report(out, res):
