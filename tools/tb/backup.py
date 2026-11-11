@@ -47,16 +47,24 @@ def plan(src):
             continue
         if n in SKIP:
             skipped.append((n, p['bytes'], '用户数据'))
-        elif GPT_NAME.match(n):
-            raise SourceError(f'有一个分区叫 {n}，和 GPT 备份文件同名，不备份（换个目录也一样，需要改工具）')
+        elif p['bytes'] >= BIG and n != 'super':
+            skipped.append((n, p['bytes'], '超过 4 GiB，不是安卓系统分区'))
         elif not ITEM_NAME.match(f'{n}.bin'):
             skipped.append((n, p['bytes'], '分区名不能当文件名'))
         elif ',' in n:
             skipped.append((n, p['bytes'], '分区名带逗号（edl 会把它拆成两个名字）'))
-        elif p['bytes'] >= BIG and n != 'super':
-            skipped.append((n, p['bytes'], '超过 4 GiB，不是安卓系统分区'))
         else:
             take.append(n)
+    # file names must not collide, also on a case-insensitive file system (macOS APFS by default):
+    # gpt_main<L> / gpt_backup<L> are reserved for the GPT dumps
+    seen = {}
+    for n in take:
+        if GPT_NAME.match(n):
+            raise SourceError(f'有一个分区叫 {n}，和 GPT 备份文件同名（不分大小写），不备份')
+        k = n.casefold()
+        if k in seen:
+            raise SourceError(f'分区 {seen[k]} 和 {n} 只差大小写，备份文件会互相覆盖，不备份')
+        seen[k] = n
     return take, skipped
 
 
@@ -90,7 +98,7 @@ def find_resumable(src):
 
 # A file name run() may write: <partition>.bin / gpt_*.bin. Any GPT name is allowed except path separators, NUL
 # and a leading dot, so generation (plan) and validation (backup.json read back) use the same rule.
-GPT_NAME = re.compile(r'^gpt_(main|backup)\d+$')    # gpt_main<L>.bin / gpt_backup<L>.bin are reserved for the GPT
+GPT_NAME = re.compile(r'^gpt_(main|backup)\d+$', re.I)    # gpt_main<L>.bin / gpt_backup<L>.bin are reserved for the GPT
 ITEM_NAME = re.compile(r'^[^/\\\0.][^/\\\0]*\.bin$')
 
 
