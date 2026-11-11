@@ -95,7 +95,9 @@
   合并前确认 CodeRabbit 的最新 Review 是 `APPROVED`，**且针对的是 PR 当前的 head 提交**（之后又推送过的话，旧的批准不算数）：
   ```bash
   gh pr view <PR> --json headRefOid --jq .headRefOid
-  # --paginate 读完所有页（默认每页 30 条），最后一行就是 CodeRabbit 最新的 Review
+  # --paginate 读完所有页（默认每页 30 条），最后一行就是 CodeRabbit 最新的 Review。
+  # pipefail：任何一页请求失败整条命令就失败，此时不要合并，重新查询。
+  set -o pipefail
   gh api --paginate repos/{owner}/{repo}/pulls/<PR>/reviews \
     --jq '.[] | select(.user.login == "coderabbitai[bot]") | "\(.state) \(.commit_id)"' | tail -n 1
   ```
