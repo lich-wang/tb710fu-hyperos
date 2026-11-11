@@ -7,7 +7,7 @@ Layout of a backup directory (work/backup/<chip serial>-<time>/):
 The state is saved after every step, so an interrupted backup continues where it stopped (same device,
 same partition table). super is read in 1 GiB pieces for the same reason.
 """
-import hashlib, json, os, re, shutil, stat, time
+import hashlib, json, os, re, shutil, stat, time, unicodedata
 
 from . import layout
 from .sources import WORK, SourceError
@@ -55,15 +55,15 @@ def plan(src):
             skipped.append((n, p['bytes'], '分区名带逗号（edl 会把它拆成两个名字）'))
         else:
             take.append(n)
-    # file names must not collide, also on a case-insensitive file system (macOS APFS by default):
+    # file names must not collide, also on a case- and normalization-insensitive file system (APFS by default):
     # gpt_main<L> / gpt_backup<L> are reserved for the GPT dumps
     seen = {}
     for n in take:
-        if GPT_NAME.match(n):
+        k = unicodedata.normalize('NFD', unicodedata.normalize('NFD', n).casefold())
+        if GPT_NAME.match(k):
             raise SourceError(f'有一个分区叫 {n}，和 GPT 备份文件同名（不分大小写），不备份')
-        k = n.casefold()
         if k in seen:
-            raise SourceError(f'分区 {seen[k]} 和 {n} 只差大小写，备份文件会互相覆盖，不备份')
+            raise SourceError(f'分区 {seen[k]!r} 和 {n!r} 在 macOS 上是同一个文件名（大小写或 Unicode 写法不同），不备份')
         seen[k] = n
     return take, skipped
 
