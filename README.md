@@ -41,6 +41,7 @@ ABL（未解锁，信任 AOSP testkey）
 | [docs/flash-guide.md](docs/flash-guide.md) | **刷机指南**：从原装 ZUI 到 HyperOS 4 的完整步骤 |
 | [docs/boot-chain.md](docs/boot-chain.md) | 锁 BL 启动原理、AVB/防回滚、EDL 备份与线刷、救砖（900E）、v3 启动链 |
 | [docs/hyperos4.md](docs/hyperos4.md) | HyperOS 4 移植：底包选择、改动清单、构建与刷入、排错记录 |
+| [docs/porting.md](docs/porting.md) | 新流程：联想原厂 vendor 跑小米框架需要补什么（兼容性检查、差异清单、小米 HAL、lwky） |
 | [hyperos/README.md](hyperos/README.md) | 笔键映射、SELinux 兼容策略、RRO overlay、Magisk 模块 |
 
 ## 仓库结构
