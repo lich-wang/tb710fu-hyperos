@@ -1,0 +1,27 @@
+name: build-check
+
+# Asks the private build repository to build the flash package for this commit on the self-hosted runner (#12).
+# The result comes back as the commit status "tb710fu/build". Pull requests from forks are skipped: they get no
+# secrets, and the runner never runs code from this repository's events directly.
+on:
+  push:
+    branches: [main, rewrite-official]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch the build
+        env:
+          TOKEN: ${{ secrets.BUILD_DISPATCH_TOKEN }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "BUILD_DISPATCH_TOKEN is not set: skipping"; exit 0; fi
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/lich-wang/tb710fu-build/dispatches \
+            -d "{\"event_type\":\"build\",\"client_payload\":{\"sha\":\"$SHA\"}}"
+          echo "build requested for $SHA"

@@ -53,8 +53,12 @@ def e2tool(name):
     raise SourceError(f'找不到 {name}：要 e2fsprogs（macOS: brew install e2fsprogs；Linux: apt install e2fsprogs）')
 
 
+# e2fsprogs writes the current time into the superblock and new inodes; a fixed time keeps builds reproducible
+E2FS_ENV = dict(os.environ, E2FSPROGS_FAKE_TIME='1230768000', E2FSCK_TIME='1230768000')
+
+
 def run(*cmd, ok=(0,)):
-    p = subprocess.run(cmd, capture_output=True, text=True, errors='replace')
+    p = subprocess.run(cmd, capture_output=True, text=True, errors='replace', env=E2FS_ENV)
     if p.returncode not in ok:
         raise SourceError(f'{os.path.basename(cmd[0])} 失败（{p.returncode}）：{(p.stdout + p.stderr).strip()[-600:]}')
     return p.stdout + p.stderr
@@ -75,7 +79,7 @@ def debugfs(img, *cmds, write=False):
 
 def fsck_clean(img):
     """e2fsck -fn exits 0 only when the filesystem is clean."""
-    return subprocess.run([e2tool('e2fsck'), '-fn', img], capture_output=True).returncode == 0
+    return subprocess.run([e2tool('e2fsck'), '-fn', img], capture_output=True, env=E2FS_ENV).returncode == 0
 
 
 def strip_footer(src, dest):
