@@ -20,6 +20,28 @@
 工具：AOSP `avbtool`（`info_image` / `add_hash_footer` / `verify_image --follow_chain_partitions`）、
 AOSP `mkbootimg` / `unpack_bootimg`。仓库不附带它们，放到 `tools/avb/`、`tools/mkbootimg/` 即可。
 
+### 检查一台设备 / 一个固件包是否信任测试密钥
+
+`tools/tb710fu.py check`（只读，Python 3.8+ 标准库；9008 方式需要 bkerler/edl 和 firehose 加载器）：
+
+```bash
+python3 tools/tb710fu.py check                       # 9008（默认）：不需要 root
+python3 tools/tb710fu.py check --adb                 # adb + root（Magisk 允许 Shell）
+python3 tools/tb710fu.py check 固件文件夹/.zip/.7z/镜像  # 离线：官方线刷包，或 9008 备份出来的 abl_a.img / vbmeta_a.img
+```
+
+- **怎么判断**：从当前槽 abl 的 LZMA 固件卷里，找出 LinuxLoader 内置的 AVB 根公钥（锁着 BL 时，vbmeta 必须用这把钥匙签），再和 AOSP 测试公钥比对。找到的公钥都会用 n0inv 和 R² 验算，确认真是一把 RSA 公钥。
+- **一并读出**：
+  - vbmeta 及其链式分区（boot、recovery、vbmeta_system）的签名公钥和回滚索引；
+  - A/B 槽状态；
+  - super 的布局和文件系统（ext4 像原厂，EROFS 多半已经刷过别的系统，这一项是推测）；
+  - 底层固件分区的 sha256 指纹。
+- **输出**：写入设备档案 `work/device/latest.json`，后面的构建和刷入以它为准。
+- **9008 方式**：还会核对芯片 HWID 和 OEM 公钥哈希，检查完自动复位开机（`--no-reset` 留在 9008）。
+
+联想公告 LEN-221035（CVE-2026-92777）只能用来推断：海外版 TB710FU **低于 ZUI 17.5.04.059** 的属于受影响版本（测试密钥）；国行 ZUXOS 不在公告里，只能实际读 abl。
+ZUXOS 1.5.04.495 免解锁补充包里的 `abl.img`（sha256 `6cfa16e6…`）带联想签名证书，内置的就是 `testkey_rsa4096`。
+
 ## 9008（EDL）
 
 - 进入：`adb reboot edl`（需 root 或在 Android 下），或者拔线 → 长按电源 15–20 s 关机 → 按住音量+和音量−插线。
