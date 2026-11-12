@@ -65,6 +65,16 @@ def gpt_partitions(blob, sector=SECTOR):
     return out
 
 
+def printgpt_name_counts(text):
+    """{name: how many GPT entries carry it, over all LUNs} (parse_printgpt keeps only the last one)."""
+    counts = {}
+    for line in text.splitlines():
+        m = PRINTGPT_LINE.match(line.strip())
+        if m:
+            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return counts
+
+
 def ab_state(flags):
     b = (flags >> 48) & 0xFF
     return {'active': bool(b & AB_ACTIVE), 'successful': bool(b & AB_SUCCESSFUL),

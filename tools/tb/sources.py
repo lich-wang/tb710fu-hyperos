@@ -94,6 +94,7 @@ class EdlSource:
         out = self.edl('printgpt', ok=r'Parsing Lun 0')
         self.sahara = layout.sahara_info(out)
         self.parts = layout.parse_printgpt(out)
+        self.names_count = layout.printgpt_name_counts(out)
         self.luns = layout.parse_lun_sectors(out)
         if 'super' not in self.parts:
             raise SourceError('GPT 里没有 super 分区，不像是 TB710FU')
@@ -155,6 +156,10 @@ class EdlSource:
             data = open(f, 'rb').read()
         skip = offset - first * layout.SECTOR
         return data[skip:skip + length]
+
+    def reread_parts(self):
+        """Partition table read again from the device (to compare after writing)."""
+        return layout.parse_printgpt(self.edl('printgpt', ok=r'Parsing Lun 0'))
 
     def reset(self):
         self.edl('reset', '--resetmode=reset')
