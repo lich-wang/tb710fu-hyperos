@@ -169,8 +169,14 @@ def precheck(src, serial_want, slot_want):
 class Writer:
     """Writes files / zeros to GPT-located partitions and reads every write back."""
 
-    def __init__(self, src, workdir):
-        self.src, self.work = src, workdir
+    def __init__(self, src, workdir, before_first_write=None):
+        self.src, self.work, self.first = src, workdir, before_first_write
+
+    def _ws(self, p, path):
+        if self.first:                      # the tablet is about to change: run the hook exactly once
+            self.first, hook = None, self.first
+            hook()
+        self.src.edl('ws', p['start'], path, f'--lun={p["lun"]}')
 
     def write_file(self, name, path, expect):
         """expect = {'bytes', 'sha256'} recorded for the file (manifest.json / backup.json)."""
@@ -180,7 +186,7 @@ class Writer:
         if n != expect['bytes'] or want != expect['sha256']:
             raise SourceError(f'{path} 和核对时的记录不一致（核对之后被改过？）：没有写 {name}')
         print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB）…', flush=True)
-        self.src.edl('ws', p['start'], path, f'--lun={p["lun"]}')
+        self._ws(p, path)
         self.verify(name, p, n, want)
 
     def zero(self, name):
@@ -190,7 +196,7 @@ class Writer:
         with open(z, 'wb') as f:
             f.truncate(n)
         print(f'  清零 {name} 前 {n / 2**20:.1f} MiB …', flush=True)
-        self.src.edl('ws', p['start'], z, f'--lun={p["lun"]}')
+        self._ws(p, z)
         self.verify(name, p, n, file_sha256(z))
         os.remove(z)
 
@@ -332,11 +338,12 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     if wipes:
         confirm('\n第一阶段还要清零 metadata 和 userdata 开头（恢复出厂，平板上的用户数据全部丢失；'
                 '不清的话新系统多半进不去）。不同意就什么都不写。', 'wipe', assume_yes)
-    # from here on the tablet changes: any earlier completion record no longer describes it
-    if os.path.exists(state_path(dev['chip_serial'])):
-        os.remove(state_path(dev['chip_serial']))
+    def drop_record():
+        # the first write is about to happen: an earlier completion record no longer describes the tablet
+        if os.path.exists(state_path(dev['chip_serial'])):
+            os.remove(state_path(dev['chip_serial']))
     with tempfile.TemporaryDirectory(dir=WORK) as t:
-        w = Writer(src, t)
+        w = Writer(src, t, before_first_write=drop_record)
         # super last among the images: the boot chain is small and quick; super takes minutes
         for d, f in sorted(plan.items(), key=lambda kv: kv[0] == 'super'):
             w.write_file(d, os.path.join(pkg, f), m['files'][f])
