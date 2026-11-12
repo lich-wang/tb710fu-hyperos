@@ -51,7 +51,7 @@ def pick(find):
     return sorted(c)[-1][1] if c else None
 
 
-def build(find_dir=None, nofind_dir=None):
+def build(find_dir=None, nofind_dir=None, allow_debug=False):
     find_dir, nofind_dir = find_dir or pick(True), nofind_dir or pick(False)
     if not find_dir or not nofind_dir:
         raise SourceError('要两份启动链：tb710fu.py framework 和 framework --no-finddevice，各自再跑 bootchain')
@@ -61,6 +61,10 @@ def build(find_dir=None, nofind_dir=None):
         raise SourceError('两份启动链不是同一台设备的')
     if fwv['find']['version'] != fwv['nofind']['version']:
         raise SourceError('两份启动链要同一个小米版本')
+    debug = [k for k in fwv if fwv[k].get('debug')]
+    if debug and not allow_debug:
+        raise SourceError(f'{"、".join(debug)} 是调试版框架（ro.adb.secure=0、ro.debuggable=1：任何人插 USB 都能用 adb）。'
+                          '只在排查启动问题时用，确实要打包就加 --allow-debug')
     if fwv['find']['find_device'] is not True or fwv['nofind']['find_device'] is not False:
         raise SourceError(f'--find 要带查找设备的启动链、--nofind 要不带的（现在 find={fwv["find"]["find_device"]}，'
                           f'nofind={fwv["nofind"]["find_device"]}）：两个目录是不是传反了')
@@ -161,7 +165,8 @@ def _assemble(out, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir):
             'lenovo': {'source': lenovo.get('source'), 'package': lenovo.get('package'),
                        'system': next(iter(fingerprints(lenovo.get('partitions', {}).get('system', {})
                                                         .get('props', {}))), None)},
-            'bootchain': {'find': find_dir, 'nofind': nofind_dir}, 'verity': bc['find']['verity']},
+            'bootchain': {'find': find_dir, 'nofind': nofind_dir}, 'verity': bc['find']['verity'],
+            'debug': bool(fwv['find'].get('debug') or fwv['nofind'].get('debug'))},
         'files': files,
         'supers': supers,
         # what flash writes (the device's current slot only); anything else, the unique partitions above all,
@@ -187,5 +192,7 @@ def report(out, m):
     d = m['device']
     print(f'绑定设备：芯片序列号 {d["chip_serial"]}  HWID {d["hwid"]}  槽 {d["slot"]}  回滚 {d["rollback"]}')
     print(f'小米 {m["inputs"]["xiaomi"]["version"]}；联想 {m["inputs"]["lenovo"]["system"]}')
+    if m['inputs'].get('debug'):
+        print('⚠ 调试版：adb 不需要授权、系统可调试。排查完换回正式版')
     print(f'\n✅ {out}')
     return True

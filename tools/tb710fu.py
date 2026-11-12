@@ -153,7 +153,7 @@ def cmd_bootchain(a):
 
 def cmd_package(a):
     try:
-        out, m = package.build(a.find, a.nofind)
+        out, m = package.build(a.find, a.nofind, allow_debug=a.allow_debug)
     except sources.SourceError as e:
         sys.exit(f'\n{e}')
     return 0 if package.report(out, m) else 1
@@ -200,6 +200,8 @@ def main():
     k = sub.add_parser('package', help='打成这台平板的刷机包（带/不带查找设备两个 super + manifest）')
     k.add_argument('--find', help='带查找设备的 bootchain 输出目录（默认最新）')
     k.add_argument('--nofind', help='不带查找设备的 bootchain 输出目录（默认最新）')
+    k.add_argument('--allow-debug', action='store_true',
+                   help='允许调试版框架（framework --debug：adb 免授权，只用于排查启动问题）')
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
             'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain,
