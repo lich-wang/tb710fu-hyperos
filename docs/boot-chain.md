@@ -133,6 +133,16 @@ python3 tools/tb710fu.py package
   - 绑定的设备：芯片序列号、HWID、OEM 公钥哈希、槽、回滚索引、super 大小；
   - 刷入计划 `plan`：第一次写哪些、向导后写哪些、哪些分区永远不写。
 - **实测**：CN 414 + yupei OS4.0.5.0，完整流程（两份框架侧、两份启动链、打包）13 分钟。
+- **可重复**：同样的输入，两次构建出来的每个镜像（`*.img`）逐字节相同；`manifest.json` 里有构建时间（`created`），只有它会变。e2fsprogs 的时间用 `E2FSPROGS_FAKE_TIME`、`E2FSCK_TIME` 固定。
+
+### 合入时的自动构建（#12）
+
+`tools/ci/build.sh` 用 `TB_WORK` 里已有的输入（设备档案、备份、联想和小米组件）一口气跑完 vendor → framework ×2 → bootchain ×2 → package，任何一步的检查不过就失败。
+
+- **跑在哪里**：自托管 runner（我的 Linux 机器），挂在私有仓库 `lich-wang/tb710fu-build` 上，不挂在这个公开仓库上，免得外人的 PR 能在那台机器上执行代码。
+- **怎么触发**：本仓库的 `.github/workflows/build-check.yml` 在 push 到 `main` / `rewrite-official`、或本仓库分支提 PR 时，通知私有仓库构建这个提交。fork 来的 PR 拿不到密钥，不会触发。
+- **结果**：作为 commit status `tb710fu/build` 写回提交，可以在分支保护里设为合入前必须通过。刷机包只留在 runner 机器上，不上传。
+- **网络**：runner 机器的网络会断开带后量子密钥交换（X25519MLKEM768）的 TLS 握手，OpenSSL 3.5 默认会发。所以 runner 进程通过它自己的 `.env` 指定一份只用 X25519 / P-256 / P-384 的 OpenSSL 配置，不改系统设置。
 
 ## 9008（EDL）
 
