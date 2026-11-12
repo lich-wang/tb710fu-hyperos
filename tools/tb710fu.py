@@ -12,10 +12,13 @@
   tb710fu.py framework                 system, system_ext, product from the imported Xiaomi images (docs/porting.md)
   tb710fu.py bootchain                 boot chain + verity footers, test-key signed at the device's rollback indexes
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
+  tb710fu.py flash [--stage first|after-setup]   9008: write the package (asks first; reads every write back)
+  tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
 device profile (work/device/latest.json: slot, rollback indexes, super layout, firmware fingerprint) that
-the later steps (pull / build / flash) use. Nothing is ever written to the device.
+the later steps (pull / build / flash) use. Only flash and restore write to the device, and only after the
+user confirms the printed plan.
 
 Options: --loader FILE (9008 firehose programmer; default work/firehose/*), --serial (adb), --no-firmware
 (skip the firmware fingerprint, faster), --no-reset (stay in 9008 afterwards).
@@ -24,7 +27,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, bootchain, check, framework, lenovo, package, sources, vendor, xiaomi  # noqa: E402
+from tb import backup, bootchain, check, flash, framework, lenovo, package, sources, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -151,6 +154,42 @@ def cmd_bootchain(a):
     return 0 if bootchain.report(out, res) else 1
 
 
+def latest_package():
+    import glob
+    c = sorted(glob.glob(os.path.join(sources.WORK, 'out', '*', 'manifest.json')), key=os.path.getmtime)
+    return os.path.dirname(c[-1]) if c else None
+
+
+def write_cmd(a, fn):
+    """9008 session for flash / restore: reset only after success (a failed write leaves the tablet in 9008)."""
+    assume = os.environ.get('TB_FLASH_ASSUME_YES') == '1'
+    src, ok = None, False
+    try:
+        src = edl_source(a)
+        ok = fn(src, assume)
+    except sources.SourceError as e:
+        print(f'\n❌ {e}', file=sys.stderr)
+        if src is not None:
+            print('平板留在 9008（没有复位）。', file=sys.stderr)
+        return 1
+    if ok or a.dry_run:
+        # a dry run resets too: the next run must start from a fresh 9008 so the chip serial can be read again
+        reset(src, a)
+    return 0
+
+
+def cmd_flash(a):
+    pkg = a.package or latest_package()
+    if not pkg:
+        print('没有刷机包：先跑 tb710fu.py package', file=sys.stderr)
+        return 1
+    return write_cmd(a, lambda src, y: flash.run(src, pkg, a.stage, a.backup, a.dry_run, y))
+
+
+def cmd_restore(a):
+    return write_cmd(a, lambda src, y: flash.restore(src, a.backup, y, a.dry_run))
+
+
 def cmd_package(a):
     try:
         out, m = package.build(a.find, a.nofind, allow_debug=a.allow_debug)
@@ -202,10 +241,21 @@ def main():
     k.add_argument('--nofind', help='不带查找设备的 bootchain 输出目录（默认最新）')
     k.add_argument('--allow-debug', action='store_true',
                    help='允许调试版框架（framework --debug：adb 免授权，只用于排查启动问题）')
+    for name, helptext in (('flash', '9008 写入刷机包（先列计划、要确认，每次写入都读回核对）'),
+                           ('restore', '9008 用这台平板自己的完整备份写回启动链和 super')):
+        w = sub.add_parser(name, help=helptext)
+        if name == 'flash':
+            w.add_argument('--stage', choices=('first', 'after-setup'), default='first',
+                           help='first：启动链 + 不带查找设备的 super + 清数据；after-setup：开机向导之后换带查找设备的 super')
+            w.add_argument('--package', help='刷机包目录（默认 work/out 里最新的）')
+        w.add_argument('--backup', help='设备完整备份（默认这台平板最新的一份）')
+        w.add_argument('--loader', help='9008 firehose 加载器')
+        w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
+        w.add_argument('--no-reset', action='store_true', help='写完留在 9008')
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
             'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain,
-            'package': cmd_package}[a.cmd](a)
+            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore}[a.cmd](a)
 
 
 if __name__ == '__main__':
