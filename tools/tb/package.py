@@ -10,9 +10,9 @@ super holds the current slot's logical partitions (the other slot's are empty); 
 of the super partition and only as far as its contents go. Each super is read back: every partition's bytes
 must match the image it came from.
 """
-import glob, hashlib, json, os, shutil, sys, time
+import glob, hashlib, json, os, re, shutil, sys, tempfile, time
 
-from . import layout
+from . import bootchain, layout
 from .lenovo import fingerprints
 from .backup import file_sha256
 from .sources import TOOLS, WORK, SourceError
@@ -59,28 +59,72 @@ def build(find_dir=None, nofind_dir=None):
     fwv = {k: json.load(open(os.path.join(bc[k]['inputs']['framework'], 'framework.json'))) for k in bc}
     if bc['find']['device'] != bc['nofind']['device'] or bc['find']['rollback'] != bc['nofind']['rollback']:
         raise SourceError('两份启动链不是同一台设备的')
-    if fwv['find']['version'] != fwv['nofind']['version'] or fwv['find']['find_device'] == fwv['nofind']['find_device']:
-        raise SourceError('两份启动链要同一个小米版本、一份带查找设备一份不带')
+    if fwv['find']['version'] != fwv['nofind']['version']:
+        raise SourceError('两份启动链要同一个小米版本')
+    if fwv['find']['find_device'] is not True or fwv['nofind']['find_device'] is not False:
+        raise SourceError(f'--find 要带查找设备的启动链、--nofind 要不带的（现在 find={fwv["find"]["find_device"]}，'
+                          f'nofind={fwv["nofind"]["find_device"]}）：两个目录是不是传反了')
     for n in COMMON + ('vendor', 'odm', 'vendor_dlkm', 'system_dlkm', 'system', 'system_ext'):
         a, b = bc['find']['images'][n]['sha256'], bc['nofind']['images'][n]['sha256']
         if a != b:
             raise SourceError(f'两份启动链的 {n} 不同（应该只有 product 和 vbmeta_system 不同）')
-    prof = json.load(open(os.path.join(WORK, 'device', 'latest.json')))
+    prof = bootchain.load_profile(os.path.join(WORK, 'device', 'latest.json'))
     dev = bc['find']['device']
     if prof['device'].get('chip_serial') != dev.get('chip_serial'):
         raise SourceError('设备档案和启动链不是同一台设备（芯片序列号不同）')
-    slot = bc['find']['slot']
+    slots = {bc['find']['slot'], bc['nofind']['slot'], prof['slot']}
+    if len(slots) != 1:
+        raise SourceError(f'槽位不一致：find {bc["find"]["slot"]}、nofind {bc["nofind"]["slot"]}、设备档案 {prof["slot"]}'
+                          '：按设备当前槽重建启动链')
+    norm = lambda r: {int(k): int(v) for k, v in r.items()}       # noqa: E731
+    if norm(prof['rollback']) != norm(bc['find']['rollback']):
+        raise SourceError(f'设备现在的回滚索引 {norm(prof["rollback"])} 和启动链里的 {norm(bc["find"]["rollback"])} 不同'
+                          '：启动链已过期，重跑 bootchain')
+    if not (prof.get('super') or {}).get('bytes'):
+        raise SourceError('设备档案里没有 super 大小：重跑 tb710fu.py check')
+    slot = prof['slot']
     super_size = prof['super']['bytes']
-    out = os.path.join(WORK, 'out', f'{fwv["find"]["version"]}-{dev.get("chip_serial") or "device"}')
-    os.makedirs(out, exist_ok=True)
-    print(f'刷机包：{out}（槽 {slot}，super {super_size / 2**30:.1f} GiB）')
+    root = os.path.join(WORK, 'out')
+    tag = re.sub(r'[^\w.-]', '_', f'{fwv["find"]["version"]}-{dev.get("chip_serial") or "device"}').lstrip('.')
+    final = os.path.join(root, tag)
+    os.makedirs(root, exist_ok=True)
+    print(f'刷机包：{final}（槽 {slot}，super {super_size / 2**30:.1f} GiB）')
+    # assemble and check in a temporary folder, swap it in at the end: a failed run never damages a previous package
+    tmp = tempfile.mkdtemp(prefix=f'.{tag}-new-', dir=root)
+    old = None
+    try:
+        manifest = _assemble(tmp, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir)
+        if os.path.exists(final):
+            old = tempfile.mkdtemp(prefix=f'.{tag}-old-', dir=root)
+            os.rmdir(old)
+            os.rename(final, old)
+        os.rename(tmp, final)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if old and not os.path.exists(final):
+            os.rename(old, final)
+        raise
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+    return final, manifest
+
+
+def copy_checked(src, dest, want):
+    """Copy a bootchain image and check it against what bootchain.json recorded for it."""
+    shutil.copyfile(src, dest)
+    if os.path.getsize(dest) != want['bytes'] or file_sha256(dest) != want['sha256']:
+        raise SourceError(f'{src} 和 bootchain.json 的记录不一致（文件被改过或损坏）：重跑 bootchain')
+
+
+def _assemble(out, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir):
     files = {}
     for n in COMMON:
-        shutil.copyfile(os.path.join(find_dir, f'{n}.img'), os.path.join(out, f'{n}.img'))
+        copy_checked(os.path.join(find_dir, f'{n}.img'), os.path.join(out, f'{n}.img'), bc['find']['images'][n])
         files[f'{n}.img'] = None
     supers = {}
     for k, d in (('nofind', nofind_dir), ('find', find_dir)):
-        shutil.copyfile(os.path.join(d, 'vbmeta_system.img'), os.path.join(out, f'vbmeta_system_{k}.img'))
+        copy_checked(os.path.join(d, 'vbmeta_system.img'), os.path.join(out, f'vbmeta_system_{k}.img'),
+                     bc[k]['images']['vbmeta_system'])
         files[f'vbmeta_system_{k}.img'] = None
         sp = os.path.join(out, f'super_{k}.img')
         print(f'  super_{k} …', flush=True)
@@ -133,7 +177,7 @@ def build(find_dir=None, nofind_dir=None):
     manifest['inputs']['xiaomi']['fingerprint'] = xm.get('metadata', {}).get('post-build')
     with open(os.path.join(out, 'manifest.json'), 'w') as f:
         json.dump(manifest, f, ensure_ascii=False, indent=1)
-    return out, manifest
+    return manifest
 
 
 def report(out, m):
