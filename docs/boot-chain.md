@@ -133,7 +133,7 @@ python3 tools/tb710fu.py package
   - 绑定的设备：芯片序列号、HWID、OEM 公钥哈希、槽、回滚索引、super 大小；
   - 刷入计划 `plan`：第一次写哪些、向导后写哪些、哪些分区永远不写。
 - **实测**：CN 414 + yupei OS4.0.5.0，完整流程（两份框架侧、两份启动链、打包）13 分钟。
-- **可重复**：同样的输入，两次构建出来的每个文件逐字节相同。e2fsprogs 的时间用 `E2FSPROGS_FAKE_TIME`、`E2FSCK_TIME` 固定。
+- **可重复**：同样的输入，两次构建出来的每个镜像（`*.img`）逐字节相同；`manifest.json` 里有构建时间（`created`），只有它会变。e2fsprogs 的时间用 `E2FSPROGS_FAKE_TIME`、`E2FSCK_TIME` 固定。
 
 ### 合入时的自动构建（#12）
 
