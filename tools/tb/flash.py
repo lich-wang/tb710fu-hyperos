@@ -122,6 +122,9 @@ def target(src, name, nbytes):
         raise SourceError(f'设备上没有 {name} 分区')
     if src.names_count.get(name, 0) != 1:
         raise SourceError(f'分区名 {name} 在 GPT 里出现了 {src.names_count.get(name, 0)} 次，不能按名字定位')
+    dup = [u for u in UNIQUE if src.names_count.get(u, 0) > 1]
+    if dup:
+        raise SourceError(f'唯一数据分区 {dup} 在 GPT 里出现了不止一次，核对不了重叠，拒绝写')
     for u in UNIQUE:
         if u in src.parts and overlaps(p, src.parts[u]):
             raise SourceError(f'{name} 的扇区和唯一数据分区 {u} 重叠，拒绝写')
@@ -169,20 +172,20 @@ class Writer:
     def __init__(self, src, workdir):
         self.src, self.work = src, workdir
 
-    def write_file(self, name, path):
+    def write_file(self, name, path, expect):
+        """expect = {'bytes', 'sha256'} recorded for the file (manifest.json / backup.json)."""
         n = os.path.getsize(path)
         p = target(self.src, name, n)
         want = file_sha256(path)
+        if n != expect['bytes'] or want != expect['sha256']:
+            raise SourceError(f'{path} 和核对时的记录不一致（核对之后被改过？）：没有写 {name}')
         print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB）…', flush=True)
         self.src.edl('ws', p['start'], path, f'--lun={p["lun"]}')
         self.verify(name, p, n, want)
 
-    def zero(self, name, nbytes=None):
-        p = self.src.parts.get(name)
-        if not p:
-            raise SourceError(f'设备上没有 {name} 分区')
-        n = min(nbytes or p['bytes'], p['bytes'])
-        target(self.src, name, n)
+    def zero(self, name):
+        n = wipe_bytes(self.src, name)
+        p = target(self.src, name, n)
         z = os.path.join(self.work, f'zero-{name}.bin')
         with open(z, 'wb') as f:
             f.truncate(n)
@@ -202,6 +205,30 @@ class Writer:
         print(f'    读回一致（sha256 {want[:16]}…）', flush=True)
 
 
+def wipe_bytes(src, name):
+    p = src.parts.get(name)
+    if not p:
+        raise SourceError(f'设备上没有 {name} 分区')
+    return min(WIPE[name] or p['bytes'], p['bytes'])
+
+
+def same_table_after(src, table, flags):
+    """Partition table read again after writing: same entries and same attribute flags (they pick the slot)."""
+    parts = src.reread_parts()
+    if table_of(parts) != table:
+        raise SourceError('写完后分区表和写之前不一样：停在这里，平板留在 9008。把输出发出来')
+    changed = sorted(n for n, p in parts.items() if flags.get(n) != p.get('flags'))
+    if changed:
+        raise SourceError(f'写完后这些分区的属性（flags，决定启动哪个槽）变了：{changed}。停在这里，平板留在 9008')
+
+
+def check_space(nbytes):
+    need = nbytes + (1 << 30)
+    free = shutil.disk_usage(WORK).free
+    if free < need:
+        raise SourceError(f'{WORK} 剩余 {free / 2**30:.1f} GiB，读回需要 {need / 2**30:.1f} GiB')
+
+
 def plan_lines(rows):
     return '\n'.join(f'  {dst:18} ← {src_desc}' for dst, src_desc in rows)
 
@@ -213,6 +240,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     slot = dev['slot']
     precheck(src, dev.get('chip_serial'), slot)
     table = table_of(src.parts)
+    flags = {n: p.get('flags') for n, p in src.parts.items()}
     bdir, _ = device_backup(dev.get('chip_serial'), table, backup_dir)
     print(f'备份：{bdir}（已核对）')
     rb_dev = rollback_now(src, slot)
@@ -233,32 +261,34 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     rows = [(d, f'{f}（sha256 {m["files"][f]["sha256"][:16]}…）') for d, f in sorted(plan.items())]
     for d, f in plan.items():
         target(src, d, m['files'][f]['bytes'])          # check every target before writing anything
-    print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {dev.get("chip_serial")}）====\n{plan_lines(rows)}')
+    wipes = []
     if stage == 'first':
-        print('  然后单独确认：清零 metadata、userdata 前 64 MiB（恢复出厂，平板上的数据全部丢失）')
+        for n in WIPE:
+            nb = wipe_bytes(src, n)
+            target(src, n, nb)
+            wipes.append((n, nb))
+    print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {dev.get("chip_serial")}）====\n{plan_lines(rows)}')
+    for n, nb in wipes:
+        print(f'  {n:18} ← 清零前 {nb / 2**20:.0f} MiB（恢复出厂，平板上的用户数据全部丢失）')
     print('不写：GPT、另一个槽、底层固件、唯一数据分区（' + '、'.join(UNIQUE) + '）')
     if dry_run:
         print('\n--dry-run：检查都通过，什么都没写')
         return False
-    need = max(m['files'][f]['bytes'] for f in plan.values()) + (1 << 30)
-    free = shutil.disk_usage(WORK).free
-    if free < need:
-        raise SourceError(f'{WORK} 剩余 {free / 2**30:.1f} GiB，读回 super 需要 {need / 2**30:.1f} GiB')
+    check_space(max(m['files'][f]['bytes'] for f in plan.values()))
+    # every authorisation before the first write: declining any of them leaves the tablet untouched
     confirm('\n确认写入上面这些分区？', 'flash', assume_yes)
+    if wipes:
+        confirm('\n第一阶段还要清零 metadata 和 userdata 开头（恢复出厂，平板上的用户数据全部丢失；'
+                '不清的话新系统多半进不去）。不同意就什么都不写。', 'wipe', assume_yes)
     with tempfile.TemporaryDirectory(dir=WORK) as t:
         w = Writer(src, t)
-        # super last: the boot chain is small and quick; super takes minutes
+        # super last among the images: the boot chain is small and quick; super takes minutes
         for d, f in sorted(plan.items(), key=lambda kv: kv[0] == 'super'):
-            w.write_file(d, os.path.join(pkg, f))
-        if stage == 'first':
-            confirm('\n启动链和 super 已写好并读回一致。下面清零 metadata 和 userdata 开头（恢复出厂，'
-                    '平板上的用户数据全部丢失；不清的话新系统多半进不去）。', 'wipe', assume_yes)
-            for n, nbytes in WIPE.items():
-                w.zero(n, nbytes)
-    after = table_of(src.reread_parts())
-    if after != table:
-        raise SourceError('写完后分区表和写之前不一样：停在这里，平板留在 9008。把输出发出来')
-    print('\n✅ 写入完成，全部读回一致，分区表没变')
+            w.write_file(d, os.path.join(pkg, f), m['files'][f])
+        for n, _ in wipes:
+            w.zero(n)
+    same_table_after(src, table, flags)
+    print('\n✅ 写入完成，全部读回一致，分区表和属性没变')
     if stage == 'first':
         print('开机后过开机向导：不要登录小米账号、不要开“查找设备”。向导完成后再进 9008 跑 flash --stage after-setup')
     return True
@@ -270,6 +300,7 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
     if not serial:
         raise SourceError('这次 edl 没打印芯片序列号，认不出平板：重新进 9008 再试')
     table = table_of(src.parts)
+    flags = {n: p.get('flags') for n, p in src.parts.items()}
     bdir, st = device_backup(serial, table, backup_dir)
     slot = st.get('slot')
     if slot != src.slot:
@@ -287,13 +318,12 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
     if dry_run:
         print('\n--dry-run：检查都通过，什么都没写')
         return False
+    check_space(max(st['items'][f'{part}.bin']['bytes'] for part, _ in rows))
     confirm('\n确认用备份写回上面这些分区？', 'restore', assume_yes)
     with tempfile.TemporaryDirectory(dir=WORK) as t:
         w = Writer(src, t)
         for part, f in rows:
-            w.write_file(part, f)
-    after = table_of(src.reread_parts())
-    if after != table:
-        raise SourceError('写完后分区表和写之前不一样：停在这里，平板留在 9008。把输出发出来')
-    print('\n✅ 已写回备份，全部读回一致')
+            w.write_file(part, f, st['items'][f'{part}.bin'])
+    same_table_after(src, table, flags)
+    print('\n✅ 已写回备份，全部读回一致，分区表和属性没变')
     return True
