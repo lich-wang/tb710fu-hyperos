@@ -162,11 +162,10 @@ def latest_package():
 
 def write_cmd(a, fn):
     """9008 session for flash / restore: reset only after success (a failed write leaves the tablet in 9008)."""
-    assume = os.environ.get('TB_FLASH_ASSUME_YES') == '1'
     src, ok = None, False
     try:
         src = edl_source(a)
-        ok = fn(src, assume)
+        ok = fn(src)
     except sources.SourceError as e:
         print(f'\n❌ {e}', file=sys.stderr)
         if src is not None:
@@ -183,11 +182,11 @@ def cmd_flash(a):
     if not pkg:
         print('没有刷机包：先跑 tb710fu.py package', file=sys.stderr)
         return 1
-    return write_cmd(a, lambda src, y: flash.run(src, pkg, a.stage, a.backup, a.dry_run, y))
+    return write_cmd(a, lambda src: flash.run(src, pkg, a.stage, a.backup, a.dry_run))
 
 
 def cmd_restore(a):
-    return write_cmd(a, lambda src, y: flash.restore(src, a.backup, y, a.dry_run))
+    return write_cmd(a, lambda src: flash.restore(src, a.backup, dry_run=a.dry_run))
 
 
 def cmd_package(a):

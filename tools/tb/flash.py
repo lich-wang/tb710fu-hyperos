@@ -38,7 +38,8 @@ def file_sha256(path, length=None):
 
 
 def confirm(prompt, word, assume_yes=False):
-    """The user types `word` to go on. assume_yes only for tests (TB_FLASH_ASSUME_YES)."""
+    """The user types `word` to go on. assume_yes is for tests calling run()/restore() directly; the command
+    line has no way to set it."""
     if assume_yes:
         print(f'{prompt}\n（测试：自动确认 "{word}"）')
         return
