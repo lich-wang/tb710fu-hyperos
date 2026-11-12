@@ -86,6 +86,31 @@ python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原�
     只有联想的刷机工具能解开，不知道 super 各段的位置，所以不能用；
   - 包里的底层固件会逐个和设备档案比对，版本不一致时提示兼容风险。本项目不写底层固件。
 
+### 新流程的启动链（bootchain）
+
+```bash
+python3 tools/tb710fu.py bootchain              # 默认开 dm-verity（vbmeta flags=0）
+python3 tools/tb710fu.py bootchain --no-verity  # 备用：flags=1，关掉 dm-verity（旧 v3 链就是这样）
+```
+
+输入：`pull`（联想原厂启动镜像）、`vendor`、`framework` 的输出，设备档案（`check`），以及设备的完整备份（`backup`）。输出在 `work/build/bootchain/<芯片序列号>-<小米版本>/`：
+
+| 镜像 | 怎么来的 |
+|---|---|
+| boot、init_boot、dtbo | 联想原厂，原样。boot 的回滚索引和设备不同时，才按设备的值重签 |
+| vendor_boot | 联想原厂。解开 v4 vendor boot，在 ramdisk 的 `first_stage_ramdisk/fstab.qcom` 里给 7 个逻辑分区各加一条 erofs 条目；用同样的头部参数重新打包；用原来的 salt 和属性重加 hash footer |
+| vendor、odm、vendor_dlkm、system_dlkm、system、system_ext、product | 加 dm-verity hashtree footer（sha256，不带 FEC），分区大小取能放下的最小值 |
+| vbmeta | testkey_rsa4096。链式布局照抄联想原厂，并核对和设备一致：boot（位置 3，rsa4096）、recovery（位置 1，rsa4096）、vbmeta_system（位置 2，rsa2048）；另含 init_boot、dtbo、vendor_boot 的 hash 描述和 vendor 侧四个分区的 hashtree 描述 |
+| vbmeta_system | testkey_rsa2048。system、system_ext、product 的 hashtree 描述，加上**设备自己的 pvmfw** 的描述（从备份取，并核对和设备当前 vbmeta_system 里记录的一致） |
+
+- **不写的分区**：recovery、pvmfw 不写，保留设备上的（检查 recovery 是用 testkey_rsa4096 签的）。
+- **回滚索引**：vbmeta 0、vbmeta_system 1783209600、boot 1736035200，都等于设备档案里的当前值，不抬高。联想 414 包自己的 vbmeta_system 是 1772668800，比设备低，所以必须重签。
+- **自检**：
+  - `avbtool verify_image --follow_chain_partitions`，链出去的三个分区用 `--expected_chain_partition` 指定公钥；
+  - avbtool 1.3.0 会把顶层的 `--key` 也套到链出去的 vbmeta_system 上，所以 vbmeta 自己的公钥另外核对；
+  - 用 CN 414 + yupei OS4.0.5.0 实测：全部通过，2 分 30 秒。vendor_boot 重新打包后，头部参数、dtb、bootconfig 和原厂完全一致，ramdisk 里只有 fstab 多了 7 行。
+- **内核**：414 的内核是 6.1.128，和 vendor_dlkm 模块的 vermagic 一致。平板上的底层固件是 495 的（abl、xbl 和 414 不同，本项目不写底层固件），两者能否配合要上真机确认（推测问题不大：现在的 v3 链也是 6.1.128 内核跑在 495 固件上）。
+
 ## 9008（EDL）
 
 - 进入：`adb reboot edl`（需 root 或在 Android 下），或者拔线 → 长按电源 15–20 s 关机 → 按住音量+和音量−插线。

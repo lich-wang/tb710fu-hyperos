@@ -124,5 +124,5 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
   - 不再需要 `sepolicy_compat.cil`、移植包的 PearlBiometric 人脸，以及 lwky 的分辨率、窗口规则、智能充电、机型伪装。
   - OS4.0.5.0 实测（3 分 36 秒）：和小米原镜像逐项比对，system 只有 `build.prop` 内容变了、新增 10 个条目；product 只有 `etc/build.prop` 变了，删掉 pangu（24 个条目）、新增 mi_ext 的 139 个条目。所有共有路径的元数据都不变，新增条目都有指定的元数据。
   - 待真机：人脸解锁（yupei 声明的是 TEE 人脸，这里没有）、`device_features/yupei.xml` 里的 144Hz 等参数和这块屏是否相符。
-- **#8（启动链）**：vendor_boot 的第一阶段 fstab 加 erofs；保留 `avb=`，按设备的回滚索引重签。
+- **#8（启动链）✅**：`tb710fu.py bootchain [--no-verity]`，详见 [boot-chain.md](boot-chain.md#新流程的启动链bootchain)。
 - **#11（真机）**：逐项确认色彩风格、充电、手写笔、皮套、相机/视频、小米账号等功能；缺哪个 HAL 再按上面的办法从 yupei 加，并给它写最小 SELinux 策略。
