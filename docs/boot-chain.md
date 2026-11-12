@@ -144,6 +144,30 @@ python3 tools/tb710fu.py package
 - **结果**：作为 commit status `tb710fu/build` 写回提交，可以在分支保护里设为合入前必须通过。刷机包只留在 runner 机器上，不上传。
 - **网络**：runner 机器的网络会断开带后量子密钥交换（X25519MLKEM768）的 TLS 握手，OpenSSL 3.5 默认会发。所以 runner 进程通过它自己的 `.env` 指定一份只用 X25519 / P-256 / P-384 的 OpenSSL 配置，不改系统设置。
 
+### 刷入（flash）与写回备份（restore）
+
+```bash
+python3 tools/tb710fu.py flash --dry-run              # 连上平板做完所有检查、打印写入计划，不写（之后平板会复位）
+python3 tools/tb710fu.py flash                        # 第一阶段：启动链 + 不带查找设备的 super，再单独确认清数据
+#   → 开机向导：不要登录小米账号、不要开"查找设备"；完成后重新进 9008
+python3 tools/tb710fu.py flash --stage after-setup    # 第二阶段：vbmeta_system + 带查找设备的 super，数据保留
+python3 tools/tb710fu.py restore                      # 出问题时：用这台平板自己的完整备份写回启动链和 super
+```
+
+- **每次都要重新进 9008**：工具靠 9008 刚连上时打印的芯片序列号认平板。上一次运行没复位、firehose 还在跑时读不到它，工具会拒绝并提示重新进 9008。
+- **写之前检查**（任何一项不过就什么都不写）：
+  - 刷机包里每个文件和 `manifest.json` 记录的长度、sha256 一致；
+  - 芯片序列号和刷机包绑定的一致，当前槽和刷机包的一致；
+  - 刷机包的回滚索引不低于平板上现在这些镜像的（低了会启动不了）；
+  - 有这台平板的完整备份：芯片序列号一致、已完成、分区表和现在一致、含全部唯一数据分区，所有文件按记录核对 sha256；
+  - 写入目标只能是当前槽的 `boot`、`init_boot`、`dtbo`、`vendor_boot`、`vbmeta`、`vbmeta_system` 和 `super`；按名字在现在的 GPT 里定位，名字必须只出现一次，扇区不能和唯一数据分区重叠，长度不能超过分区；
+  - 第二阶段只在平板上的 `vbmeta_system` 正是这个刷机包第一阶段写的那份时才允许；
+  - 本机磁盘要放得下 super 的读回。
+- **确认**：打印计划（分区 ← 文件、sha256）后要输入 `flash`；第一阶段写完启动链和 super 后，清数据（`metadata` 整个、`userdata` 前 64 MiB）再单独输入 `wipe`。`restore` 要输入 `restore`。
+- **读回**：每写一个分区立刻读回比对 sha256，不一致就停在那里，**不复位**，平板留在 9008。写完后重新读 GPT，和写之前比对。没有跳过读回的选项。
+- **restore** 只写回启动链（含 `recovery`）和 super，不碰 userdata；如果第一阶段已经清过数据，原系统开机时会自己重新初始化。
+- **测试情况**：用模拟的 edl（按这台平板真实的 GPT 和备份内容建的 LUN 镜像）测过：确认、预检拒绝的各种情况、写坏后读回发现、第一、二阶段、写回备份（含 19 GB 的 super）。**还没在真机上写过。**
+
 ## 9008（EDL）
 
 - 进入：`adb reboot edl`（需 root 或在 Android 下），或者拔线 → 长按电源 15–20 s 关机 → 按住音量+和音量−插线。
