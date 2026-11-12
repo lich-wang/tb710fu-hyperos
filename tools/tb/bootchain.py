@@ -206,8 +206,12 @@ def load_profile(path):
     return prof
 
 
+BACKUP_FILES = ('pvmfw', 'vbmeta_system', 'recovery')   # what the build takes from the device's backup
+
+
 def device_backup(backup_mod, prof, backup_dir=None):
-    """A complete backup of the profiled device (same chip serial) and slot; the latest one when not given."""
+    """A complete backup of the profiled device (same chip serial) and slot; the latest one when not given.
+    Of its files, the ones the build reads (BACKUP_FILES of the current slot) are checked against backup.json."""
     serial = (prof.get('device') or {}).get('chip_serial')
     if not serial:
         raise SourceError('设备档案里没有芯片序列号（adb 检查不读它），认不出该用哪份备份：用 9008 重跑 tb710fu.py check')
@@ -236,7 +240,15 @@ def device_backup(backup_mod, prof, backup_dir=None):
             if backup_dir:
                 raise SourceError(f'{d} 还没备份完，先接着跑 backup')
             continue
-        backup_mod.load(d)          # every recorded file present with its recorded sha256
+        # only the files the build reads must be there (a CI work directory holds just these three)
+        need_files = {f'{n}{prof["slot"]}.bin': (st.get('items') or {}).get(f'{n}{prof["slot"]}.bin')
+                      for n in BACKUP_FILES}
+        unrecorded = [n for n, v in need_files.items() if not v]
+        if unrecorded:
+            raise SourceError(f'{d} 的 backup.json 里没有 {", ".join(unrecorded)}')
+        bad = backup_mod.verify_items(d, need_files)
+        if bad:
+            raise SourceError(f'{d} 里这些文件丢失或和记录不符：{", ".join(bad)}。重新备份。')
         return d
     raise SourceError(f'没有这台平板（芯片序列号 {serial}、当前槽 {prof["slot"]}）的完整备份：先跑 tb710fu.py backup')
 
