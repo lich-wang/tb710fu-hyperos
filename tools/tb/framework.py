@@ -15,7 +15,7 @@ Files keep the uid/gid/mode/SELinux label of the official images; added files ta
 Output: work/build/framework/<version>[-nofind][-debug]/{system,system_ext,product}.img + framework.json.
 Needs erofs-utils (fsck.erofs, mkfs.erofs).
 """
-import json, os, shutil, stat, subprocess, sys, tarfile, time
+import glob, json, os, shutil, stat, subprocess, sys, tarfile, time
 
 from . import layout
 from .backup import file_sha256
@@ -222,9 +222,9 @@ def product_prop(lines, miext, keep_finddevice, debug):
 
 def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
     if not xiaomi_dir:
-        c = sorted((os.path.join(WORK, 'xiaomi', d) for d in os.listdir(os.path.join(WORK, 'xiaomi')))
-                   if os.path.isdir(os.path.join(WORK, 'xiaomi')) else [], key=os.path.getmtime)
-        xiaomi_dir = c[-1] if c else None
+        # finished imports only: glob skips the hidden temporary folders of an import in progress
+        c = sorted(glob.glob(os.path.join(WORK, 'xiaomi', '*', 'xiaomi.json')), key=os.path.getmtime)
+        xiaomi_dir = os.path.dirname(c[-1]) if c else None
     if not xiaomi_dir or not os.path.exists(os.path.join(xiaomi_dir, 'xiaomi.json')):
         raise SourceError('没有小米官方组件：先跑 tb710fu.py import')
     info = json.load(open(os.path.join(xiaomi_dir, 'xiaomi.json')))
