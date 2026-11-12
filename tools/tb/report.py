@@ -97,8 +97,8 @@ def collect():
         m = _load(mj) or {}
         inp = m.get('inputs') or {}
         d = m.get('device') or {}
-        out += [f'刷机包：{os.path.basename(os.path.dirname(mj))}（{m.get("created")}）',
-                f'  小米 {(inp.get("xiaomi") or {}).get("version")}；联想 {(inp.get("lenovo") or {}).get("system")}',
+        out += [f'刷机包：{os.path.basename(os.path.dirname(mj))}（{m.get("created") or "?"}）',
+                f'  小米 {(inp.get("xiaomi") or {}).get("version") or "?"}；联想 {(inp.get("lenovo") or {}).get("system") or "?"}',
                 f'  绑定芯片序列号 {short_serial(d.get("chip_serial"))}、槽 {d.get("slot")}；'
                 f'dm-verity {"开" if inp.get("verity", True) else "关（--no-verity）"}'
                 + ('；调试版' if inp.get('debug') else '')]
