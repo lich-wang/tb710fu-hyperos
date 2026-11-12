@@ -100,10 +100,15 @@ def collect():
         out += [f'刷机包：{os.path.basename(os.path.dirname(mj))}（{m.get("created") or "?"}）',
                 f'  小米 {(inp.get("xiaomi") or {}).get("version") or "?"}；联想 {(inp.get("lenovo") or {}).get("system") or "?"}',
                 f'  绑定芯片序列号 {short_serial(d.get("chip_serial"))}、槽 {d.get("slot")}；'
-                f'dm-verity {"开" if inp.get("verity", True) else "关（--no-verity）"}'
+                f'dm-verity {({True: "开", False: "关（--no-verity）"}).get(inp.get("verity"), "?")}'
                 + ('；调试版' if inp.get('debug') else '')]
     else:
         out.append('刷机包：没有（还没跑 package）')
+    # folder names (backup, package) carry the full chip serial: shorten every occurrence in the whole text
+    serials = {s for s in ((prof or {}).get('device', {}).get('chip_serial'),
+                           (_load(mj) or {}).get('device', {}).get('chip_serial') if mj else None) if s and len(s) > 6}
+    for s in serials:
+        out = [line.replace(s, short_serial(s)) for line in out]
     return out
 
 

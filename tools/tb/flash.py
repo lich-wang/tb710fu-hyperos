@@ -206,8 +206,9 @@ class Writer:
         got = file_sha256(back, n) if os.path.getsize(back) >= n else None
         os.remove(back)
         if got != want:
-            raise SourceError(f'{name} 读回和写入的不一致：停在这里，平板留在 9008，不要拔线重启。'
-                              '把这段输出发出来；可以用 tb710fu.py restore 写回备份')
+            raise SourceError(f'{name} 读回和写入的不一致：已停止，平板留在 9008（没有复位）。'
+                              '先把这段输出原样保存、发出来，不要急着重试写入或开机。'
+                              '写回备份的办法：拔线 → 长按电源 15–20 秒关机 → 按住音量+和音量−插线重新进 9008 → tb710fu.py restore --dry-run，再 tb710fu.py restore（restore 要重新进 9008 才能读到芯片序列号）')
         print(f'    读回一致（sha256 {want[:16]}…）', flush=True)
 
 

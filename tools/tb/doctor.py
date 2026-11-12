@@ -152,10 +152,10 @@ def md5_prefix(path):
     return h.hexdigest()
 
 
-def check_downloads(r, verify):
+def check_downloads(r, verify, loader=None):
     print('\n[下载]')
     try:
-        loader = sources.find_loader()
+        loader = sources.find_loader(loader)
         sha = hashlib.sha256(open(loader, 'rb').read()).hexdigest()
         if sha in sources.KNOWN_LOADERS:
             r.ok(f'9008 加载器 {loader}（已知：{sources.KNOWN_LOADERS[sha]}）')
@@ -282,7 +282,7 @@ def run(usb=False, verify=False, loader=None):
     print(f'环境检查（工作目录 {WORK}）')
     check_computer(r)
     check_aosp(r)
-    check_downloads(r, verify)
+    check_downloads(r, verify, loader)
     check_disk(r)
     check_usb_host(r)
     if usb:

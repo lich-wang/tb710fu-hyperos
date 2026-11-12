@@ -16,7 +16,8 @@
 - **先完整备份**（第 2 步），并把备份目录另外复制一份到别的盘。里面的唯一数据（IMEI、校准、密钥）丢了找不回来。
 - 不要恢复旧的 userdata 原始镜像（TEE 防回滚，PIN 会永远解不开）。
 - 开机向导里**不要登录小米账号、不要打开"查找设备"**。
-- 出错时先停下，把输出原样发出来，不要反复重试写入。写入读回不一致时工具会停在 9008，**不要拔线重启**。
+- 出错时先停下，把输出原样发出来，不要反复重试写入。写入读回不一致时工具会停在 9008（没有复位）：先保存输出、发出来，不要重试写入或开机；
+  要写回备份时，拔线 → 长按电源 15–20 秒关机 → 按键重新进 9008 → `restore --dry-run` → `restore`。
 - 用 AI Agent 帮你操作时，让它读 [`AGENT.md`](../AGENT.md)；写入前的确认词（`flash`、`wipe`、`setup-done`、`restore`）应由你自己看过计划后决定。
 
 ## 1. 准备
@@ -116,7 +117,13 @@ python3 tools/tb710fu.py report     # 原来的版本线索、ABL 状态和公�
 
 - **内核与固件的搭配**：启动链用的是联想组件里的内核（例如 CN 414 的 6.1.128），平板底层固件不动。
   不同版本的底层固件配别的版本的内核能不能开机，正是要测的。请在报告里写清两边的版本。
-- **dm-verity**：默认开着。开着进不了系统时，可以用 `bootchain --no-verity` 重建再试（报告里注明）。
+- **dm-verity**：默认开着。开着进不了系统时，两份启动链都要加 `--no-verity` 重建，再重新打包（报告里注明）：
+  ```bash
+  python3 tools/tb710fu.py bootchain --no-verity --framework-dir work/build/framework/OS4.0.5.0.XPZCNXM
+  python3 tools/tb710fu.py bootchain --no-verity --framework-dir work/build/framework/OS4.0.5.0.XPZCNXM-nofind
+  python3 tools/tb710fu.py package
+  python3 tools/tb710fu.py flash --dry-run
+  ```
 - **海外版（ROW）**：ROW 官方包的 rawprogram 是加密的，`pull --package` 用不了；平板还是原厂系统时可以 `pull` 自己的备份。
 - [porting.md](porting.md) 里标了"待真机"的项，例如设备兼容性矩阵缺的两个框架服务、联想自己的 lwky 服务。
 - 只验证过 yupei `OS4.0.5.0.XPZCNXM`；更新的小米版本 `import` 会提示未验证，需要 `--force`，结果请在报告里注明。
