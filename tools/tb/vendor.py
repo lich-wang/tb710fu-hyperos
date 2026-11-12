@@ -170,6 +170,13 @@ def build(lenovo_dir=None):
     o = os.path.realpath(out)
     if src == o or src.startswith(o + os.sep):
         raise SourceError(f'来源 {lenovo_dir} 就在输出目录 {out} 里，替换输出会删掉来源：把来源放到别处')
+    try:
+        with open(os.path.join(out, 'vendor.json')) as f:
+            prev = os.path.realpath(json.load(f).get('lenovo', ''))
+    except (OSError, ValueError):
+        prev = None
+    if prev and prev != src:
+        raise SourceError(f'{out} 是另一个来源（{prev}）的构建结果，不覆盖：改一下来源目录名，或先删掉它')
     print(f'vendor 侧：{lenovo_dir} → {out}')
     os.makedirs(root, exist_ok=True)
     # build in a temporary folder and swap it in at the end: a failed rebuild never damages the previous result
@@ -193,7 +200,7 @@ def build(lenovo_dir=None):
 
 
 def _build(lenovo_dir, info, out):
-    res = {'lenovo': lenovo_dir, 'lenovo_files': info.get('files', {}), 'images': {}}
+    res = {'lenovo': os.path.realpath(lenovo_dir), 'lenovo_files': info.get('files', {}), 'images': {}}
     for n in PASS:
         src = os.path.join(lenovo_dir, f'{n}.img')
         if not os.path.exists(src):
