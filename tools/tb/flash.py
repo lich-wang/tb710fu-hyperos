@@ -332,6 +332,9 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     if wipes:
         confirm('\n第一阶段还要清零 metadata 和 userdata 开头（恢复出厂，平板上的用户数据全部丢失；'
                 '不清的话新系统多半进不去）。不同意就什么都不写。', 'wipe', assume_yes)
+    # from here on the tablet changes: any earlier completion record no longer describes it
+    if os.path.exists(state_path(dev['chip_serial'])):
+        os.remove(state_path(dev['chip_serial']))
     with tempfile.TemporaryDirectory(dir=WORK) as t:
         w = Writer(src, t)
         # super last among the images: the boot chain is small and quick; super takes minutes
