@@ -38,7 +38,8 @@ ABL（未解锁，信任 AOSP testkey）
 
 | 文档 | 内容 |
 |---|---|
-| [docs/flash-guide.md](docs/flash-guide.md) | **刷机指南**：从原装 ZUI 到 HyperOS 4 的完整步骤 |
+| [docs/flash-guide.md](docs/flash-guide.md) | **刷机指南**：从原装 ZUI 到 HyperOS 4 的完整步骤（旧方案，已实测） |
+| [docs/testing.md](docs/testing.md) | **新流程真机测试指南**：只用官方来源构建并刷入（测试中，欢迎参与） |
 | [docs/boot-chain.md](docs/boot-chain.md) | 锁 BL 启动原理、AVB/防回滚、EDL 备份与线刷、救砖（900E）、v3 启动链 |
 | [docs/hyperos4.md](docs/hyperos4.md) | HyperOS 4 移植：底包选择、改动清单、构建与刷入、排错记录 |
 | [docs/porting.md](docs/porting.md) | 新流程：联想原厂 vendor 跑小米框架需要补什么（兼容性检查、差异清单、小米 HAL、lwky） |
@@ -47,7 +48,7 @@ ABL（未解锁，信任 AOSP testkey）
 ## 仓库结构
 
 ```
-tools/          tb710fu.py + tb/（新流程入口，见 #1；目前有 `check` 只读检查是否信任 AOSP 测试密钥、`backup` 9008 完整备份、`pull` 取出联想原厂组件、`import` 导入小米平板 8 官方包、`vendor` 构建 vendor 侧、`framework` 构建框架侧、`bootchain` 启动链与签名、`package` 刷机包）、
+tools/          tb710fu.py + tb/（新流程入口，见 #1；目前有 `check` 只读检查是否信任 AOSP 测试密钥、`backup` 9008 完整备份、`pull` 取出联想原厂组件、`import` 导入小米平板 8 官方包、`vendor` 构建 vendor 侧、`framework` 构建框架侧、`bootchain` 启动链与签名、`package` 刷机包、`flash` / `restore` 9008 写入与写回备份）、
                 make_v3_bootchain.py（v3 启动链）、build_os4.py（HyperOS 4 分区构建）、make_super.py、lp_unpack.py、
                 erofs_meta.py、sepolicy_fix.py、flash_super.sh、mac/displaymode.swift
 hyperos/        笔按键映射、SELinux 兼容策略、RRO overlay 源码、Magisk 模块
@@ -64,6 +65,13 @@ work/           （不入库）你自己设备的备份、底包、构建产物
 
 > **推荐用 AI Agent 来刷**：让一个能执行命令的 AI 编程 Agent 读取 [`AGENT.md`](AGENT.md) 和刷机指南，
 > 由它执行命令、校验结果，需要你动手时它会停下来告诉你。
+
+### 新流程（测试中，邀请真机测试）
+
+`tools/tb710fu.py` 只用官方来源：联想原厂组件（从你的平板读，或联想官方包）+ 小米平板 8 官方 OTA，
+在你自己的电脑上构建一个只属于你这台平板的刷机包，再用 9008 写入（每一步都有检查，写入前要确认，写完逐个读回）。
+构建已完整跑通，**真机写入还没测过**。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
+结果用 [真机测试报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=device-test.yml) 提交（只跑到 `check` 也有用）。
 
 ## 相关项目
 
