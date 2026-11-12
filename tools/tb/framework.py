@@ -15,7 +15,7 @@ Files keep the uid/gid/mode/SELinux label of the official images; added files ta
 Output: work/build/framework/<version>[-nofind][-debug]/{system,system_ext,product}.img + framework.json.
 Needs erofs-utils (fsck.erofs, mkfs.erofs).
 """
-import glob, json, os, shutil, stat, subprocess, sys, tarfile, time
+import glob, json, os, shutil, stat, subprocess, sys, tarfile, time, uuid
 
 from . import layout
 from .backup import file_sha256
@@ -105,8 +105,10 @@ def move(src, dst):
 class Stage:
     """An extracted partition plus the metadata of every path that did not come from its own image."""
 
-    def __init__(self, name, root, meta):
+    def __init__(self, name, root, meta, version=''):
         self.name, self.root, self.meta, self.extra, self.defaulted = name, root, meta, {}, []
+        # fixed filesystem UUID: mkfs.erofs picks a random one, which makes every build of the same tree differ
+        self.uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f'tb710fu:{version}:{name}'))
 
     def add(self, rel, meta, mode=None):
         m = dict(meta)
@@ -158,7 +160,7 @@ class Stage:
         shutil.rmtree(self.root)                       # the tar has everything now; keeps the peak disk use down
         if os.path.exists(img):
             os.remove(img)
-        p = subprocess.run([tool('mkfs.erofs'), '-b4096', '-zlz4hc,9', f'-T{MTIME}', '--tar=f', img, tpath],
+        p = subprocess.run([tool('mkfs.erofs'), '-b4096', '-zlz4hc,9', f'-T{MTIME}', f'-U{self.uuid}', '--tar=f', img, tpath],
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         os.remove(tpath)
         if p.returncode:
@@ -238,8 +240,8 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
     meta = {n: meta_of(img[n], os.path.join(out, f'meta_{n}.json')) for n in ('system', 'product', 'mi_ext')}
     for n in ('system', 'product', 'mi_ext'):
         extract(img[n], os.path.join(stage, n))
-    S = Stage('system', os.path.join(stage, 'system'), meta['system'])
-    P = Stage('product', os.path.join(stage, 'product'), meta['product'])
+    S = Stage('system', os.path.join(stage, 'system'), meta['system'], info['version'])
+    P = Stage('product', os.path.join(stage, 'product'), meta['product'], info['version'])
     M = os.path.join(stage, 'mi_ext')
     changes = {'system': [], 'product': []}
     sysroot = os.path.join(S.root, 'system')
