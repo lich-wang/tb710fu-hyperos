@@ -77,7 +77,8 @@ def vendor_boot(src, dest, work):
     unpacked = os.path.join(work, 'vb')
     args = run(mkb('unpack_bootimg.py') + ['--boot_img', src, '--out', unpacked, '--format', 'mkbootimg'],
                text=True).strip()
-    frags = re.findall(r"--vendor_ramdisk_fragment (\S+)", args)
+    argv = split_args(args)      # unpack_bootimg shell-quotes paths (spaces in TB_WORK)
+    frags = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == '--vendor_ramdisk_fragment']
     if len(frags) != 1:
         raise SourceError(f'vendor_boot 有 {len(frags)} 个 ramdisk 片段，只支持 1 个')
     rd = frags[0]
@@ -93,7 +94,7 @@ def vendor_boot(src, dest, work):
     with open(rd, 'wb') as f:
         f.write(run(['lz4', '-l', '-12', '--favor-decSpeed', '-c'], input=cpio_write(entries, trailer)))
     # rebuild with the same header arguments
-    cmd = mkb('mkbootimg.py') + split_args(args) + ['--vendor_boot', dest]
+    cmd = mkb('mkbootimg.py') + argv + ['--vendor_boot', dest]
     run(cmd)
     if os.path.getsize(dest) > part_size:
         raise SourceError('vendor_boot 重新打包后超过分区大小')
@@ -179,9 +180,62 @@ def hashtree(src, dest, name, props=()):
 
 # ---------------------------------------------------------------- build
 
+TESTKEY4096_SHA1 = '2597c218aae470a130f61162feaae70afd97f011'   # avbtool info_image "Public key (sha1)"
+
 def latest(kind):
     c = sorted(glob.glob(os.path.join(WORK, 'build', kind, '*', f'{kind}.json')), key=os.path.getmtime)
     return os.path.dirname(c[-1]) if c else None
+
+
+def load_profile(path):
+    """Device profile of a successful check, with what the build reads from it."""
+    try:
+        with open(path) as f:
+            prof = json.load(f)
+    except (OSError, ValueError):
+        raise SourceError(f'读不到设备档案 {path}：先跑 tb710fu.py check')
+    if not prof.get('ok'):
+        raise SourceError(f'设备档案 {path} 是一次没通过的检查：' + '；'.join(prof.get('errors') or ['原因未记录'])
+                          + '。处理后重跑 tb710fu.py check')
+    missing = [k for k in ('slot', 'rollback', 'vbmeta', 'device') if not prof.get(k)]
+    if missing or not (prof['vbmeta'].get('vbmeta') and prof['vbmeta'].get('recovery')):
+        raise SourceError(f'设备档案 {path} 缺少 {missing or "vbmeta 链"}：重跑 tb710fu.py check')
+    return prof
+
+
+def device_backup(backup_mod, prof, backup_dir=None):
+    """A complete backup of the profiled device (same chip serial) and slot; the latest one when not given."""
+    serial = (prof.get('device') or {}).get('chip_serial')
+    if not serial:
+        raise SourceError('设备档案里没有芯片序列号（adb 检查不读它），认不出该用哪份备份：用 9008 重跑 tb710fu.py check')
+    if backup_dir:
+        cands = [backup_dir]
+    else:
+        root = os.path.join(WORK, 'backup')
+        cands = sorted((os.path.join(root, d) for d in os.listdir(root)) if os.path.isdir(root) else [], reverse=True)
+    for d in cands:
+        try:
+            with open(os.path.join(d, 'backup.json')) as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            if backup_dir:
+                raise SourceError(f'{d} 不是本工具做的备份（没有 backup.json）')
+            continue
+        if (st.get('device') or {}).get('chip_serial') != serial:
+            if backup_dir:
+                raise SourceError(f'{d} 不是这台平板（芯片序列号 {serial}）的备份')
+            continue
+        if st.get('slot') != prof['slot']:
+            if backup_dir:
+                raise SourceError(f'{d} 备份时当前槽是 {st.get("slot")}，设备档案是 {prof["slot"]}：重新备份')
+            continue
+        if not st.get('complete'):
+            if backup_dir:
+                raise SourceError(f'{d} 还没备份完，先接着跑 backup')
+            continue
+        backup_mod.load(d)          # every recorded file present with its recorded sha256
+        return d
+    raise SourceError(f'没有这台平板（芯片序列号 {serial}、当前槽 {prof["slot"]}）的完整备份：先跑 tb710fu.py backup')
 
 
 def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None, profile=None, verity=True):
@@ -189,22 +243,55 @@ def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None,
     lenovo_dir = lenovo_dir or vendor_mod.latest_lenovo()
     vendor_dir = vendor_dir or latest('vendor')
     framework_dir = framework_dir or latest('framework')
-    backup_dir = backup_dir or backup_mod.latest()
-    prof = json.load(open(profile or os.path.join(WORK, 'device', 'latest.json')))
-    for d, what in ((lenovo_dir, 'pull'), (vendor_dir, 'vendor'), (framework_dir, 'framework'), (backup_dir, 'backup')):
+    prof = load_profile(profile or os.path.join(WORK, 'device', 'latest.json'))
+    for d, what in ((lenovo_dir, 'pull'), (vendor_dir, 'vendor'), (framework_dir, 'framework')):
         if not d or not os.path.isdir(d):
             raise SourceError(f'缺 {what} 的输出：先跑 tb710fu.py {what}')
+    with open(os.path.join(vendor_dir, 'vendor.json')) as f:
+        vsrc = json.load(f).get('lenovo') or ''
+    if os.path.realpath(vsrc) != os.path.realpath(lenovo_dir):
+        raise SourceError(f'vendor 构建（{vendor_dir}）来自 {vsrc}，不是这次的联想组件 {lenovo_dir}：'
+                          f'用 tb710fu.py vendor 重建，或指定一致的目录')
+    backup_dir = device_backup(backup_mod, prof, backup_dir)
     for k in (K4096, K2048):
         need(k, 'AOSP external/avb/test/data 的测试密钥')
     slot = prof['slot']
     rb = {int(k): v for k, v in prof['rollback'].items()}
     if prof.get('testkey') != 'trusted':
         raise SourceError('设备档案说 ABL 不信任测试密钥，不能构建')
+    if any(k not in rb for k in (0, 2, 3)):
+        raise SourceError(f'设备档案的回滚位置不全（{sorted(rb)}，要 0、2、3）：重跑 tb710fu.py check')
 
-    fw = json.load(open(os.path.join(framework_dir, 'framework.json')))
+    with open(os.path.join(framework_dir, 'framework.json')) as f:
+        fw = json.load(f)
     tag = f'{prof["device"].get("chip_serial") or "device"}-{fw["version"]}' + \
           ('' if fw['find_device'] else '-nofind') + ('-debug' if fw['debug'] else '') + ('' if verity else '-noverity')
-    out = os.path.join(WORK, 'build', 'bootchain', tag)
+    tag = re.sub(r'[^\w.-]', '_', tag).lstrip('.')
+    root = os.path.join(WORK, 'build', 'bootchain')
+    final = os.path.join(root, tag)
+    os.makedirs(root, exist_ok=True)
+    print(f'启动链：{final}')
+    # build in a temporary folder and swap it in at the end: a failed rebuild never damages the previous result
+    tmp = tempfile.mkdtemp(prefix=f'.{tag}-new-', dir=root)
+    old = None
+    try:
+        res = _build(tmp, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, backup_dir)
+        if os.path.exists(final):
+            old = tempfile.mkdtemp(prefix=f'.{tag}-old-', dir=root)
+            os.rmdir(old)
+            os.rename(final, old)
+        os.rename(tmp, final)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if old and not os.path.exists(final):
+            os.rename(old, final)
+        raise
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+    return final, res
+
+
+def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, backup_dir):
     work = os.path.join(out, 'work')
     os.makedirs(work, exist_ok=True)
     res = {'device': prof['device'], 'slot': slot, 'rollback': rb, 'verity': verity, 'inputs': {
@@ -250,6 +337,9 @@ def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None,
         res['checks'].append(f'boot 按设备回滚索引 {rb[3]} 重签')
     else:
         res['checks'].append(f'boot 原样（回滚索引 {rb[3]} 和设备一致）')
+    if f'Public key (sha1):        {TESTKEY4096_SHA1}' not in info(boot)['text']:
+        raise SourceError('boot 内嵌的公钥不是 testkey_rsa4096，和 vbmeta 的链式公钥对不上')
+    res['checks'].append('boot 内嵌公钥 testkey_rsa4096（= vbmeta 链式公钥）')
     print('  vendor_boot：第一阶段 fstab 加 erofs …', flush=True)
     res['vendor_boot'] = vendor_boot(os.path.join(lenovo_dir, 'vendor_boot.img'), os.path.join(out, 'vendor_boot.img'),
                                      work)
@@ -311,7 +401,7 @@ def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None,
     # (every image is checked against its embedded key, the chained ones against --expected_chain_partition),
     # then check that vbmeta's own embedded key is testkey_rsa4096.
     top = info(os.path.join(vdir, 'vbmeta.img'))['text']
-    if 'Public key (sha1):        2597c218aae470a130f61162feaae70afd97f011' not in top:
+    if f'Public key (sha1):        {TESTKEY4096_SHA1}' not in top:
         raise SourceError('vbmeta 内嵌的公钥不是 testkey_rsa4096')
     cmd = ['verify_image', '--image', os.path.join(vdir, 'vbmeta.img'), '--follow_chain_partitions']
     for n, (loc, key) in CHAINS.items():
@@ -334,7 +424,7 @@ def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None,
     res['created'] = time.strftime('%Y-%m-%dT%H:%M:%S%z')
     with open(os.path.join(out, 'bootchain.json'), 'w') as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
-    return out, res
+    return res
 
 
 def report(out, res):
