@@ -71,7 +71,7 @@ work/           （不入库）你自己设备的备份、底包、构建产物
 `tools/tb710fu.py` 只用官方来源：联想原厂组件（从你的平板读，或联想官方包）+ 小米平板 8 官方 OTA，
 在你自己的电脑上构建一个只属于你这台平板的刷机包，再用 9008 写入（每一步都有检查，写入前要确认，写完逐个读回）。
 构建已完整跑通，**真机写入还没测过**。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
-结果用 [真机测试报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=device-test.yml) 提交（只跑到 `check` 也有用）。
+结果用 [刷机报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 提交（成功、失败、只跑到 `check` 都有用）。
 
 ## 相关项目
 

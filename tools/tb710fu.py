@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """TB710FU: Xiaomi HyperOS from official sources on a locked bootloader.
 
+  tb710fu.py doctor [--usb]            is this computer ready (tools, downloads, disk, USB); --usb: practise 9008
   tb710fu.py check                     9008 (default): read-only check of the connected tablet
   tb710fu.py check --adb               same over adb (needs root: Magisk, allow Shell)
   tb710fu.py check FILE|DIR|ZIP|7Z...  offline: abl / vbmeta of an official package or of dumped images
@@ -14,6 +15,7 @@
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
   tb710fu.py flash [--stage first|after-setup]   9008: write the package (asks first; reads every write back)
   tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
+  tb710fu.py report                    text for the flash report issue (versions, ABL, package; read only)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
 device profile (work/device/latest.json: slot, rollback indexes, super layout, firmware fingerprint) that
@@ -27,7 +29,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, bootchain, check, flash, framework, lenovo, package, sources, vendor, xiaomi  # noqa: E402
+from tb import backup, bootchain, check, doctor, flash, framework, lenovo, package, report, sources, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -251,10 +253,17 @@ def main():
         w.add_argument('--loader', help='9008 firehose 加载器')
         w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
         w.add_argument('--no-reset', action='store_true', help='写完留在 9008')
+    d = sub.add_parser('doctor', help='刷机前的环境检查：工具、下载、磁盘、USB；--usb 练习手动进 9008 并测试通信')
+    d.add_argument('--usb', action='store_true', help='引导手动进 9008，只读测试 edl 通信后复位')
+    d.add_argument('--verify-downloads', action='store_true', help='校验小米底包的 md5（10 GB，要一会儿）')
+    d.add_argument('--loader', help='9008 firehose 加载器')
+    sub.add_parser('report', help='生成刷机报告要贴的信息（原版本、ABL 状态、刷入的版本；只读，不连设备）')
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
             'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain,
-            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore}[a.cmd](a)
+            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore,
+            'report': lambda a: 0 if report.run() else 1,
+            'doctor': lambda a: 0 if doctor.run(a.usb, a.verify_downloads, a.loader) else 1}[a.cmd](a)
 
 
 if __name__ == '__main__':

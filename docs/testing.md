@@ -40,12 +40,31 @@ sudo apt install e2fsprogs erofs-utils lz4 7zip python3
 python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl
 ```
 
-进 9008：已 root 的系统里 `adb reboot edl`；或拔线 → 长按电源 15–20 秒关机 → 按住音量+和音量−插线。
-**每次运行写设备或读设备的命令前都要重新进 9008**（工具要靠刚进 9008 时打印的芯片序列号认平板）。
+### 环境检查（动平板之前必须过）
+
+```bash
+python3 tools/tb710fu.py doctor                       # 工具、AOSP 工具和测试密钥、9008 加载器、小米底包、磁盘、USB 驱动
+python3 tools/tb710fu.py doctor --verify-downloads    # 同上，另外校验小米底包的 md5（下载完做一次）
+python3 tools/tb710fu.py doctor --usb                 # 9008 实操：按提示用按键手动进 9008，只读测试通信，然后复位
+```
+
+- `doctor` 每一项没准备好都会给出处理办法，缺的下载会直接给出地址和字节数。全部 ✅ 再往下走。
+- **小米底包**（必需）：yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包，约 9.9 GB，放到 `work/`。地址 `doctor` 会打印，也见 [flash-guide.md](flash-guide.md)。
+  文件名里的 `4fe489f542` 是 md5 的前 10 位，`--verify-downloads` 会核对。大文件用 `aria2c -c -x 16 -s 16 <地址>`（可断点续传）。
+- **联想官方 9008 包**（视情况）：平板还是原厂系统时不需要（`pull` 从你自己的备份取）；已刷过别的系统时要用它取联想组件。
+  9008 加载器也在这个包里（`xbl_s_devprg_ns.melf`）：`7zz e 联想包.7z -owork/firehose -r xbl_s_devprg_ns.melf`。地址见 [boot-chain.md](boot-chain.md) 或 `doctor` 的输出。
+- **USB 驱动**：macOS 不需要装驱动；Linux 要有高通 9008（`05c6`）的 udev 规则，ModemManager 最好先停掉，`doctor` 会检查；Windows 暂不支持。
+  用能传数据的线，直接插电脑上的口。
+- **手动进 9008 必须会**：刷机中途平板开不了机时，只能靠按键进 9008 救回来，所以 `doctor --usb` 要求用按键进：
+  拔线 → 长按电源 15–20 秒彻底关机 → 同时按住音量+和音量− → 插线（屏幕保持全黑就对了）。`doctor --usb` 通过了才继续。
+  平板已 root 时也可以 `adb reboot edl`，但不能代替这一步练习。
+
+**每次运行读设备或写设备的命令前都要重新进 9008**（工具要靠刚进 9008 时打印的芯片序列号认平板；上一条命令结束时会让平板复位）。
 
 ## 2. 步骤
 
 ```bash
+python3 tools/tb710fu.py doctor --usb   # 环境和 9008 都通了再开始（见上一节）
 python3 tools/tb710fu.py check          # 只读：ABL 是否信任测试密钥，生成设备档案 work/device/latest.json
 python3 tools/tb710fu.py backup         # 只读：完整备份（二十多 GB，断了重跑会接着读）——备份目录另存一份！
 python3 tools/tb710fu.py pull           # 从备份取联想原厂组件（平板已不是原厂系统时：pull --package 联想官方包.7z）
@@ -62,7 +81,6 @@ python3 tools/tb710fu.py flash                          # 第一阶段：启动�
 python3 tools/tb710fu.py flash --stage after-setup      # 第二阶段：换带查找设备的 super，数据保留
 ```
 
-- 下载地址：联想官方包见 [boot-chain.md](boot-chain.md)（"检查一台设备 / 一个固件包"一节），小米 yupei OTA 见 [flash-guide.md](flash-guide.md)。
 - 每一步都有自己的检查，不通过就停下并说明原因；按提示处理，不要改代码绕过。
 - 也可以在构建完成前先跑 `check`，把结论发出来：这本身就是有用的测试数据。
 
@@ -75,8 +93,14 @@ python3 tools/tb710fu.py restore        # 用你这台平板自己的备份写�
 
 ## 3. 要测什么、怎么报告
 
-请用 [**真机测试报告**](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=device-test.yml) 模板开 issue，
-不管成功、失败，还是只跑到 `check` 都欢迎。最有用的信息：
+请用 [**刷机报告**](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 模板开 issue，
+不管成功、失败，还是只跑到 `check` 都请提交。先跑一下（只读，不连平板）：
+
+```bash
+python3 tools/tb710fu.py report     # 原来的版本线索、ABL 状态和公钥、回滚索引、底层固件版本、联想 / 小米输入、刷机包
+```
+
+把输出整段贴进模板的“工具生成的信息”。模板里还要填：
 
 1. **你的平板**：原厂系统的地区和版本（设置 → 关于；或 `check` 输出里的 build 字符串）、`check` 的结论和完整输出；
 2. **输入**：联想组件来自你的备份还是官方包（哪个版本）、小米 OTA 的版本；
