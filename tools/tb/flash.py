@@ -11,7 +11,7 @@ overlap a unique-data partition (persist, modemst1/2, fsg, fsc, devinfo, frp, ke
 uefivarstore, cdt, ddr, proinfo, lenovolock). Every write is read back; a mismatch stops at once and leaves the
 tablet in 9008 (no reset). The partition table is compared again after the writes.
 """
-import hashlib, json, os, shutil, tempfile
+import hashlib, json, os, shutil, tempfile, time
 
 from . import avb, backup as backup_mod, check, layout
 from .sources import WORK, SourceError
@@ -229,6 +229,42 @@ def check_space(nbytes):
         raise SourceError(f'{WORK} 剩余 {free / 2**30:.1f} GiB，读回需要 {need / 2**30:.1f} GiB')
 
 
+def no_overlap(src, writes):
+    """writes = [(partition, bytes)]: refuse when any two of the ranges written overlap on the disk."""
+    rng = []
+    for name, nbytes in writes:
+        p = src.parts[name]
+        rng.append((name, {'lun': p['lun'], 'start': p['start'], 'sectors': max(nbytes // layout.SECTOR, 1)}))
+    for i, (a, ra) in enumerate(rng):
+        for b, rb in rng[i + 1:]:
+            if overlaps(ra, rb):
+                raise SourceError(f'{a} 和 {b} 要写的扇区重叠（GPT 不对？），拒绝写')
+
+
+def rollback_of_backup(bdir, slot):
+    """Rollback indexes of the images in the backup: {location: index} for vbmeta, vbmeta_system, boot."""
+    def blob(part):
+        with open(os.path.join(bdir, f'{part}.bin'), 'rb') as f:
+            vb = avb.find_vbmeta(f.read())
+        if vb is None:
+            raise SourceError(f'备份里的 {part} 没有 AVB 签名')
+        return vb
+    v = avb.parse_vbmeta(blob(f'vbmeta{slot}'))
+    out = {v['rollback_location']: v['rollback']}
+    for c in v['chains']:
+        if c['partition'] in ('boot', 'vbmeta_system'):
+            out[c['rollback_location']] = avb.parse_vbmeta(blob(c['partition'] + slot))['rollback']
+    return out
+
+
+# stage first leaves a record here; after-setup requires it (same tablet, same package)
+def state_path(serial):
+    return os.path.join(WORK, 'flash', f'{serial}.json')
+
+
+HEAD = 1 << 20      # start of super compared before after-setup (holds the liblp metadata of the variant)
+
+
 def plan_lines(rows):
     return '\n'.join(f'  {dst:18} ← {src_desc}' for dst, src_desc in rows)
 
@@ -253,11 +289,23 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     bad = [d for d in plan if d not in allowed]
     if bad:
         raise SourceError(f'manifest 的写入计划里有不允许写的分区 {bad}')
+    pkg_id = file_sha256(os.path.join(pkg, 'manifest.json'))
     if stage == 'after-setup':
-        # only from stage first: the tablet's vbmeta_system must be the package's nofind one
+        # only after a complete stage first of this very package on this tablet
+        try:
+            with open(state_path(dev['chip_serial'])) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            rec = {}
+        if rec.get('stage') != 'first' or rec.get('package') != pkg_id:
+            raise SourceError('这台电脑上没有这个刷机包第一阶段完整写完的记录：先做 flash --stage first（它全部成功才会留记录）')
         cur = src.read_range(f'vbmeta_system{slot}', 0, m['files']['vbmeta_system_nofind.img']['bytes'])
         if hashlib.sha256(cur).hexdigest() != m['files']['vbmeta_system_nofind.img']['sha256']:
             raise SourceError('平板上的 vbmeta_system 不是这个刷机包第一阶段写的：先做 flash --stage first')
+        with open(os.path.join(pkg, 'super_nofind.img'), 'rb') as f:
+            want_head = hashlib.sha256(f.read(HEAD)).hexdigest()
+        if hashlib.sha256(src.read_range('super', 0, HEAD)).hexdigest() != want_head:
+            raise SourceError('平板上 super 的开头不是这个刷机包第一阶段写的：先做 flash --stage first')
     rows = [(d, f'{f}（sha256 {m["files"][f]["sha256"][:16]}…）') for d, f in sorted(plan.items())]
     for d, f in plan.items():
         target(src, d, m['files'][f]['bytes'])          # check every target before writing anything
@@ -267,6 +315,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
             nb = wipe_bytes(src, n)
             target(src, n, nb)
             wipes.append((n, nb))
+    no_overlap(src, [(d, m['files'][f]['bytes']) for d, f in plan.items()] + wipes)
     print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {dev.get("chip_serial")}）====\n{plan_lines(rows)}')
     for n, nb in wipes:
         print(f'  {n:18} ← 清零前 {nb / 2**20:.0f} MiB（恢复出厂，平板上的用户数据全部丢失）')
@@ -276,6 +325,9 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
         return False
     check_space(max(m['files'][f]['bytes'] for f in plan.values()))
     # every authorisation before the first write: declining any of them leaves the tablet untouched
+    if stage == 'after-setup':
+        confirm('\n第二阶段只能在开机向导完成之后做（向导里没登录小米账号、没开查找设备）。向导已经完成了吗？',
+                'setup-done', assume_yes)
     confirm('\n确认写入上面这些分区？', 'flash', assume_yes)
     if wipes:
         confirm('\n第一阶段还要清零 metadata 和 userdata 开头（恢复出厂，平板上的用户数据全部丢失；'
@@ -288,6 +340,9 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
         for n, _ in wipes:
             w.zero(n)
     same_table_after(src, table, flags)
+    os.makedirs(os.path.dirname(state_path(dev['chip_serial'])), exist_ok=True)
+    with open(state_path(dev['chip_serial']), 'w') as f:
+        json.dump({'stage': stage, 'package': pkg_id, 'finished': time.strftime('%Y-%m-%dT%H:%M:%S%z')}, f)
     print('\n✅ 写入完成，全部读回一致，分区表和属性没变')
     if stage == 'first':
         print('开机后过开机向导：不要登录小米账号、不要开“查找设备”。向导完成后再进 9008 跑 flash --stage after-setup')
@@ -313,6 +368,12 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
             raise SourceError(f'备份里没有 {part}')
         target(src, part, st['items'][f'{part}.bin']['bytes'])
         rows.append((part, f))
+    no_overlap(src, [(part, st['items'][f'{part}.bin']['bytes']) for part, _ in rows])
+    rb_dev, rb_bak = rollback_now(src, slot), rollback_of_backup(bdir, slot)
+    low = {k: (rb_bak.get(k), v) for k, v in rb_dev.items() if rb_bak.get(k) is None or rb_bak[k] < v}
+    if low:
+        raise SourceError(f'备份里镜像的回滚索引低于平板上现在的 {low}（位置: (备份, 设备)）：写回后多半启动不了。'
+                          '平板在备份之后升级过系统？用当时版本的联想官方包恢复')
     print(f'\n==== 写回备份（{bdir}，槽 {slot}）====\n{plan_lines(rows)}')
     print('不写：GPT、另一个槽、底层固件、唯一数据分区；userdata 不动（备份里本来就没有）')
     if dry_run:
