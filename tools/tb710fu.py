@@ -8,6 +8,7 @@
   tb710fu.py pull                      Lenovo stock parts for the build, from a full backup of the tablet
   tb710fu.py pull --package ZIP|7Z|DIR  ... or from an official Lenovo 9008 package
   tb710fu.py import OTA.zip            Xiaomi Pad 8 (yupei) parts from the official Xiaomi full OTA package
+  tb710fu.py vendor                    vendor side of the new super from the Lenovo stock parts (docs/porting.md)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
 device profile (work/device/latest.json: slot, rollback indexes, super layout, firmware fingerprint) that
@@ -20,7 +21,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, check, lenovo, sources, xiaomi  # noqa: E402
+from tb import backup, check, lenovo, sources, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -123,6 +124,14 @@ def cmd_import(a):
     return 0 if xiaomi.report(out, info) else 1
 
 
+def cmd_vendor(a):
+    try:
+        out, res = vendor.build(a.lenovo)
+    except sources.SourceError as e:
+        sys.exit(f'\n{e}')
+    return 0 if vendor.report(out, res) else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -147,8 +156,11 @@ def main():
     i = sub.add_parser('import', help='导入小米平板 8（yupei）官方全量 OTA 包')
     i.add_argument('ota', help='yupei-ota_full-*.zip')
     i.add_argument('--force', action='store_true', help='允许没验证过的版本')
+    v = sub.add_parser('vendor', help='用联想原厂组件构建 vendor 侧（vendor 改 fstab，odm/dlkm 原样）')
+    v.add_argument('--lenovo', help='pull 的输出目录（默认最新的）')
     a = ap.parse_args()
-    return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import}[a.cmd](a)
+    return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
+            'vendor': cmd_vendor}[a.cmd](a)
 
 
 if __name__ == '__main__':
