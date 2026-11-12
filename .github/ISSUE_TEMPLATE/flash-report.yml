@@ -1,0 +1,127 @@
+name: 刷机报告（成功、失败都请提交）
+description: 每次刷机（或只跑到 check）的结果：原来的版本、ABL 状态、刷入的版本、成功与否。用 AI Agent 刷机时，让 Agent 按 AGENT.md 填写
+title: "[刷机报告] <原来的版本> → <刷入的版本>：<成功 / 失败在哪一步>"
+labels: ["flash-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        成功的报告和失败的一样重要：它告诉后来的人哪些版本组合能用。
+        **不要贴**：备份文件、刷机包、唯一数据分区的内容、密码、完整的芯片序列号（`report` 输出里已经缩写）。
+        新流程见 [测试指南](https://github.com/lich-wang/tb710fu-hyperos/blob/main/docs/testing.md)，旧方案见 [刷机指南](https://github.com/lich-wang/tb710fu-hyperos/blob/main/docs/flash-guide.md)。
+  - type: dropdown
+    id: result
+    attributes:
+      label: 结果
+      options:
+        - 成功：进入系统
+        - 刷入成功，但开不了机（卡开机动画 / 反复重启 / 900E / 黑屏）
+        - 刷入过程中失败或被工具拒绝
+        - 构建失败（还没写入平板）
+        - 只跑了 check / backup
+        - 已用 restore 写回原系统
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: 刷机方式
+      options:
+        - 新流程（tools/tb710fu.py）
+        - 旧方案（刷机指南：移植包 + v3 启动链）
+        - 其他（下面说明）
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: 用的 AI Agent
+      description: 例如 Claude Code（模型名）、Codex、Cursor；自己手动操作就写“手动”
+    validations:
+      required: true
+  - type: input
+    id: original
+    attributes:
+      label: 原来的版本
+      description: 刷机前平板上的系统：地区和版本号（例如 CN ZUXOS 1.5.04.495、ROW ZUI 17.5.04.059）；之前刷过别的系统也写上
+    validations:
+      required: true
+  - type: dropdown
+    id: abl
+    attributes:
+      label: ABL 状态（check 的结论）
+      options:
+        - 信任 AOSP 测试密钥（testkey_rsa4096）
+        - 不信任测试密钥
+        - 判断不了
+        - 没跑 check
+    validations:
+      required: true
+  - type: input
+    id: flashed
+    attributes:
+      label: 刷入的版本
+      description: 小米版本（例如 yupei OS4.0.5.0.XPZCNXM）+ 联想组件的版本和来源（自己的备份 / 官方包 CN 17.5.04.414）；用了 --no-verity / --force / --allow-debug 也写上
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: 工具生成的信息
+      description: 新流程：`python3 tools/tb710fu.py report` 的完整输出（含 ABL 公钥、回滚索引、底层固件版本、刷机包）。旧方案：贴 `edl printgpt` 开头的芯片信息和你用的文件版本
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: 走到了哪一步
+      options:
+        - check
+        - backup / pull / import
+        - 构建（vendor → package）
+        - flash --dry-run
+        - flash 第一阶段
+        - 开机向导
+        - flash 第二阶段（after-setup）
+        - restore
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: 出错的地方和原始输出
+      description: 失败时必填：哪个命令、原样的报错（不要只写“失败了”）；工具拒绝写入时它给出的原因
+      render: text
+  - type: input
+    id: host
+    attributes:
+      label: 电脑系统
+      description: 例如 Ubuntu 24.04、macOS 26（Apple Silicon）；Python、erofs-utils、edl 的版本
+  - type: checkboxes
+    id: works
+    attributes:
+      label: 正常的功能（进了系统再勾）
+      options:
+        - label: WiFi
+        - label: 蓝牙
+        - label: 触屏
+        - label: 手写笔（书写 / 压感 / 按键）
+        - label: 键盘
+        - label: 摄像头（前 / 后）
+        - label: 扬声器 / 麦克风 / 耳机
+        - label: 充电和电量显示
+        - label: 亮度、自动亮度、旋转等传感器
+        - label: 120 Hz
+        - label: USB 数据 / 网络共享
+        - label: 小米账号登录（第二阶段之后）
+        - label: 人脸解锁
+  - type: textarea
+    id: notes
+    attributes:
+      label: 不正常的功能、其他说明
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 能进系统就附 `adb logcat -b all -d` 和 `adb shell dmesg`（作为附件拖进来）；900E 时附 edl 导出的 md_KBOOT_LOG.BIN；Agent 的完整会话记录也欢迎
