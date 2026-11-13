@@ -1,7 +1,7 @@
 # TB710FU 免解锁刷小米澎湃 OS 4
 
 在 **不解锁 Bootloader** 的联想小新 Pad Pro GT（TB710FU，骁龙 8 Gen 3 / SM8650）上，
-从联想原装 ZUI 1.5.04.495 刷到 **小米澎湃 OS 4（HyperOS 4，Android 17，移植自小米平板 8）**。
+用官方来源构建并刷入 **小米澎湃 OS 4（HyperOS 4，Android 17，框架来自小米平板 8 yupei）**。
 
 > 本项目的逆向分析、代码和文档主要由 AI 编程助手在作者的指导下完成；
 > 作者负责设备操作、方案决策和每一步的实机验证。
@@ -11,72 +11,61 @@
 > `keystore`、`ssd`、`secdata`、`uefivarstore`、`cdt`、`ddr`）**任何时候都不要写**，动手前先完整备份。
 > 一切后果自负。
 
-## 效果
+## 状态：测试中，邀请真机测试
 
-日常可用：显示 3200×2000@120Hz、WiFi/蓝牙、三个摄像头、传感器、四扬声器、小米账号、人脸解锁（非 TEE）、
-Magisk root、USB 网络共享（NCM，Mac 可用）、无线副屏 / 小米互联投屏、手写笔（笔键映射）。
+`tools/tb710fu.py` 的每一步都能在电脑上完整跑通（构建已在真实输入上跑过），刷入命令在模拟环境里测过，
+**但还没有在任何一台真机上写入过**。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
+结果用 [刷机报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 提交（成功、失败、只跑到 `check` 都有用）。
 
-已知限制：
-- 小米"查找设备"、超级小爱专家模式依赖小米专有 TEE/安全芯片，无法使用。**不要打开查找设备**。
-- 小米"手写笔"设置页显示未连接（只认小米笔），笔本身的书写、压感、按键都正常。
+> **推荐用 AI Agent 来做**：让一个能执行命令的 AI 编程 Agent 先读 [`AGENT.md`](AGENT.md)。
+> 它只用仓库里的脚本，遇到问题不刷机，整理好报告给你看过后用 `gh` 提 issue；进 9008、写入前的确认都由你来做。
+
+已知限制（和小米平板 8 的硬件差异决定，无法解决）：
+- 小米"查找设备"、超级小爱专家模式依赖小米专有 TEE/安全芯片。开机向导里**不要登录小米账号、不要打开查找设备**。
+- 小米"手写笔"设置页只认小米笔；联想笔的按键映射已加进系统。
 
 ## 原理一览
 
 ```
 ABL（未解锁，信任 AOSP testkey）
- ├─ boot / init_boot / dtbo / vendor_boot = 移植作者原版（GKI 6.1.128，fstab 支持 EROFS），testkey 重签
- ├─ vbmeta = testkey_rsa4096 重新签名；vbmeta_system / pvmfw / recovery 保留 ZUI 495 版（防回滚）
- └─ super = HyperOS 4（yupei）system / system_ext / product  +  HyperOS 3 移植包的 vendor / odm / *_dlkm
+ ├─ boot / init_boot / dtbo / vendor_boot = 联想原厂组件（vendor_boot 的 fstab 补 EROFS 条目），按设备的回滚索引用 testkey 重签
+ ├─ vbmeta / vbmeta_system = testkey 重新签名，链到各分区的 verity
+ └─ super = 小米 yupei 官方 system / system_ext / product  +  联想原厂 vendor / odm / *_dlkm
 ```
 
-- **为什么锁 BL 也能刷**：这台机器的 ABL 信任 AOSP 公开测试密钥（`testkey_rsa4096`），
-  社区"免解锁补充包"正是利用这一点。详见 [docs/boot-chain.md](docs/boot-chain.md)。
-- **HyperOS 4 怎么来的**：vendor 侧沿用 HyperOS 3 移植包（Android 14 vendor 接口），只把框架侧换成小米平板 8 的
-  HyperOS 4，并补上 SELinux、属性、overlay 等兼容改动。详见 [docs/hyperos4.md](docs/hyperos4.md)。
+- **为什么锁 BL 也能刷**：这台机器的 ABL 信任 AOSP 公开测试密钥（`testkey_rsa4096`）。`check` 会确认你的平板是不是这样。
+  详见 [docs/boot-chain.md](docs/boot-chain.md)。
+- **联想 vendor 跑小米框架需要补什么**：兼容性检查、差异清单、小米 HAL，见 [docs/porting.md](docs/porting.md)。
+- **全用官方来源**：联想组件从你自己的平板备份读（或联想官方 9008 包），小米组件来自小米官方 OTA；
+  刷机包在你自己的电脑上构建，只属于你这台平板（绑定芯片序列号、当前槽、回滚索引）。仓库不分发任何镜像。
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
-| [docs/flash-guide.md](docs/flash-guide.md) | **刷机指南**：从原装 ZUI 到 HyperOS 4 的完整步骤（旧方案，已实测） |
-| [docs/testing.md](docs/testing.md) | **新流程真机测试指南**：只用官方来源构建并刷入（测试中，欢迎参与） |
-| [docs/boot-chain.md](docs/boot-chain.md) | 锁 BL 启动原理、AVB/防回滚、EDL 备份与线刷、救砖（900E）、v3 启动链 |
-| [docs/hyperos4.md](docs/hyperos4.md) | HyperOS 4 移植：底包选择、改动清单、构建与刷入、排错记录 |
-| [docs/porting.md](docs/porting.md) | 新流程：联想原厂 vendor 跑小米框架需要补什么（兼容性检查、差异清单、小米 HAL、lwky） |
-| [hyperos/README.md](hyperos/README.md) | 笔键映射、SELinux 兼容策略、RRO overlay、Magisk 模块 |
+| [docs/testing.md](docs/testing.md) | **真机测试指南**：准备、环境检查、构建、刷入、报告 |
+| [AGENT.md](AGENT.md) | 给 AI Agent 的规程：只用仓库脚本、遇到问题不刷机、用 `gh` 提 issue |
+| [docs/boot-chain.md](docs/boot-chain.md) | 锁 BL 启动原理、AVB/防回滚、备份、启动链、刷机包、刷入与写回、9008、900E |
+| [docs/porting.md](docs/porting.md) | 联想原厂 vendor 跑小米框架：兼容性检查、差异清单、小米 HAL、lwky |
+| [hyperos/README.md](hyperos/README.md) | 笔键映射、USB 网络共享（NCM）overlay |
 
 ## 仓库结构
 
 ```
-tools/          tb710fu.py + tb/（新流程入口，见 #1；目前有 `check` 只读检查是否信任 AOSP 测试密钥、`backup` 9008 完整备份、`pull` 取出联想原厂组件、`import` 导入小米平板 8 官方包、`vendor` 构建 vendor 侧、`framework` 构建框架侧、`bootchain` 启动链与签名、`package` 刷机包、`flash` / `restore` 9008 写入与写回备份）、
-                make_v3_bootchain.py（v3 启动链）、build_os4.py（HyperOS 4 分区构建）、make_super.py、lp_unpack.py、
-                erofs_meta.py、sepolicy_fix.py、flash_super.sh、mac/displaymode.swift
-hyperos/        笔按键映射、SELinux 兼容策略、RRO overlay 源码、Magisk 模块
+tools/          tb710fu.py + tb/：doctor 环境检查、check 是否信任测试密钥、backup 9008 完整备份、pull 取联想组件、
+                import 导入小米 OTA、vendor / framework 构建、bootchain 启动链与签名、package 刷机包、
+                flash / restore 9008 写入与写回、report 刷机报告信息
+                make_super.py、erofs_meta.py（构建用到）、lp_unpack.py、research/（研究脚本）、ci/、mac/displaymode.swift
+hyperos/        笔按键映射、NCM overlay 源码
 extras/         Mac 无线副屏色彩测量与描述文件
 docs/           文档
-AGENT.md        给 AI Agent 的规程（新流程；旧方案见 docs/agent-legacy.md）
+AGENT.md        给 AI Agent 的规程
 work/           （不入库）你自己设备的备份、底包、构建产物
 ```
 
-## 怎么刷
-
-完整步骤：**[docs/flash-guide.md](docs/flash-guide.md)**——从联想官方 ZUI 1.5.04.495 开始，进 9008 备份，
-线刷 HyperOS 3 移植包，换 v3 启动链，构建并刷入 HyperOS 4。
-
-> **推荐用 AI Agent 来刷**：让一个能执行命令的 AI 编程 Agent 读取 [`docs/agent-legacy.md`](docs/agent-legacy.md) 和刷机指南，
-> 由它执行命令、校验结果，需要你动手时它会停下来告诉你。
-
-### 新流程（测试中，邀请真机测试）
-
-`tools/tb710fu.py` 只用官方来源：联想原厂组件（从你的平板读，或联想官方包）+ 小米平板 8 官方 OTA，
-在你自己的电脑上构建一个只属于你这台平板的刷机包，再用 9008 写入（每一步都有检查，写入前要确认，写完逐个读回）。
-构建已完整跑通，**真机写入还没测过**。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
-结果用 [刷机报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 提交（成功、失败、只跑到 `check` 都有用）。
-用 AI Agent 帮你做时，让它先读 [`AGENT.md`](AGENT.md)：它只用仓库里的脚本，遇到问题不刷机，整理好报告给你看过后用 `gh` 提 issue。
-
 ## 相关项目
 
-- 想在这台平板上跑 Linux / Steam：见 [ArmadaOS Freedom](https://github.com/mydanyi/armadaos-freedom)（TB710FU 支持正在合入上游，可与 HyperOS 共存）。
+- 想在这台平板上跑 Linux / Steam：见 [ArmadaOS Freedom](https://github.com/ArmadaOS-Freedom/armadaos-freedom)。
 - 本仓库前身 [tb710fu-hyperos-steamos](https://github.com/lich-wang/tb710fu-hyperos-steamos)（HyperOS 4 + SteamOS 双系统，已归档）。
 
 ## 许可

@@ -99,7 +99,7 @@ Ubuntu 的 secilc 3.9 不认识 Android 17 新加的 `(policycap functionfs_secl
 | `start micharge-hal_lwky` | 启动 micharge HAL | 跟着 micharge 的决定走 |
 | `lwky.hyper.*` 属性 | 机型伪装，供 vendor 脚本读取 | 不要（vendor 那边改成写死，见上） |
 
-product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、手写笔、电池属性、mi_ext 合并、查找设备、人脸）在 `tools/build_os4.py` 里，属于 #7。
+product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、手写笔、电池属性、mi_ext 合并、查找设备、人脸）由 `tb710fu.py framework` 处理，见下面 #7。
 
 ## 下一步
 
