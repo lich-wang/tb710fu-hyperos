@@ -67,7 +67,7 @@ body:
     id: report
     attributes:
       label: 工具生成的信息
-      description: `python3 tools/tb710fu.py report` 的完整输出（含 ABL 公钥、回滚索引、底层固件版本、刷机包）
+      description: "`python3 tools/tb710fu.py report` 的完整输出（含 ABL 公钥、回滚索引、底层固件版本、刷机包）"
       render: text
     validations:
       required: true
