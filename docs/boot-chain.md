@@ -90,7 +90,7 @@ python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原�
 
 ```bash
 python3 tools/tb710fu.py bootchain              # 默认开 dm-verity（vbmeta flags=0）
-python3 tools/tb710fu.py bootchain --no-verity  # 备用：flags=1，关掉 dm-verity（旧 v3 链就是这样）
+python3 tools/tb710fu.py bootchain --no-verity  # 备用：flags=1，关掉 dm-verity（作者平板之前用的启动链就是这样）
 ```
 
 输入：`pull`（联想原厂启动镜像）、`vendor`、`framework` 的输出，设备档案（`check`），以及设备的完整备份（`backup`）。输出在 `work/build/bootchain/<芯片序列号>-<小米版本>/`：
@@ -109,7 +109,7 @@ python3 tools/tb710fu.py bootchain --no-verity  # 备用：flags=1，关掉 dm-v
   - `avbtool verify_image --follow_chain_partitions`，链出去的三个分区用 `--expected_chain_partition` 指定公钥；
   - avbtool 1.3.0 会把顶层的 `--key` 也套到链出去的 vbmeta_system 上，所以 vbmeta 自己的公钥另外核对；
   - 用 CN 414 + yupei OS4.0.5.0 实测：全部通过，2 分 30 秒。vendor_boot 重新打包后，头部参数、dtb、bootconfig 和原厂完全一致，ramdisk 里只有 fstab 多了 7 行。
-- **内核**：414 的内核是 6.1.128，和 vendor_dlkm 模块的 vermagic 一致。平板上的底层固件是 495 的（abl、xbl 和 414 不同，本项目不写底层固件），两者能否配合要上真机确认（推测问题不大：现在的 v3 链也是 6.1.128 内核跑在 495 固件上）。
+- **内核**：414 的内核是 6.1.128，和 vendor_dlkm 模块的 vermagic 一致。平板上的底层固件是 495 的（abl、xbl 和 414 不同，本项目不写底层固件），两者能否配合要上真机确认（推测问题不大：作者平板之前用的启动链也是 6.1.128 内核跑在 495 固件上）。
 
 ### 刷机包（package）
 
@@ -187,27 +187,11 @@ python3 tools/tb710fu.py restore                      # 出问题时：用这台
 就能看到真正的崩溃原因。调试时可以给 `vendor_boot` 的 bootconfig 加 `androidboot.init_fatal_panic=true`，
 让 init 的致命错误也进 900E，便于抓日志。
 
-## 本机的救砖与"v3 启动链"
+## 背景：为什么 vendor_boot 要补 EROFS、内核要和模块配套
 
-起点：HyperOS 3 移植包（酷安 @兰微卡鱼，底包为红米平板 2 Pro）刷完后进 900E，转储显示：
+这两条是作者平板早期刷第三方移植包时进 900E 得到的教训，新流程的 `vendor` / `bootchain` 已经按此处理：
 
-```
-init: [libfs_mgr] Invalid ext4 superblock on '/dev/block/dm-2'
-init: Failed to mount /system: File exists
-Kernel panic - not syncing: Attempted to kill init!
-```
-
-原因：免解锁补充包为了过防回滚，把整套启动链换成了 ZUI 495 的镜像；但 495 的 `vendor_boot` 里
-first-stage fstab 对 system/vendor/product 等逻辑分区**只写了 ext4**，而 HyperOS 的 super 全是 **EROFS**。
-单纯在 fstab 里加 erofs 条目后不再 panic，但又卡开机动画——495 的 boot 内核（6.1.157）与 super 里
-system_dlkm/vendor_dlkm 的模块（6.1.128）版本不一致。
-
-最终可用的 **v3 启动链**：
-- `boot`、`init_boot`、`dtbo`、`vendor_boot` 用移植作者原版（内核 6.1.128，与模块匹配；fstab 每个逻辑分区 ext4+erofs 两条）。
-  原版 `vendor_boot` 的 footer 摘要是旧的：`erase_footer` 后重新 `add_hash_footer`。
-- 新 `vbmeta`：`testkey_rsa4096`，flags=1，chain `boot`/`recovery`/`vbmeta_system`。
-- `vbmeta_system`、`pvmfw`、`recovery` **保留设备上 495 的版本**，以满足防回滚。
-
-其他注意点：
-- `metadata` 分区被清零过时不是有效 f2fs，首次开机会自动格式化，属正常。
-- 刷机包里 `misc.img` 带 BCB `bootonce-bootloader`（首次启动进 fastboot），按需处理。
+- 联想原厂 `vendor_boot` 的 first-stage fstab 对 system / vendor / product 等逻辑分区**只写了 ext4**，而小米的 super 全是 **EROFS**。
+  不补 erofs 条目，init 挂不上 system，内核 panic（`Invalid ext4 superblock` → `Failed to mount /system` → `Attempted to kill init!`）。
+- boot 的内核要和 `vendor_dlkm` / `system_dlkm` 里模块的版本一致，否则卡开机动画。新流程的启动链和 dlkm 都取自同一个联想版本。
+- `metadata` 分区被清零后不是有效 f2fs，首次开机会自动格式化，属正常。

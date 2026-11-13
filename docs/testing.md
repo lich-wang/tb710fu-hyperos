@@ -2,7 +2,7 @@
 
 > **状态：测试中，邀请真机测试。** 新流程（`tools/tb710fu.py`）的每一步都能在电脑上完整跑通，
 > 刷入命令在模拟环境里测过，**但还没有在任何一台真机上写入过**。第一批真机测试就是要回答"能不能开机、哪些功能正常"。
-> 想要一台稳定的日常设备，请等测试结果，或者用 [刷机指南](flash-guide.md) 里已经实测过的旧方案。
+> 想要一台稳定的日常设备，请等测试结果。
 
 新流程只用官方来源：联想原厂组件（从你的平板读，或联想官方 9008 包）+ 小米平板 8（yupei）官方 OTA，
 在你自己的电脑上构建一个**只属于你这台平板**的刷机包（绑定芯片序列号、当前槽、回滚索引），再用 9008 写入。
@@ -51,7 +51,8 @@ python3 tools/tb710fu.py doctor --usb                 # 9008 实操：按提示�
 ```
 
 - `doctor` 每一项没准备好都会给出处理办法，缺的下载会直接给出地址和字节数。全部 ✅ 再往下走。
-- **小米底包**（必需）：yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包，约 9.9 GB，放到 `work/`。地址 `doctor` 会打印，也见 [flash-guide.md](flash-guide.md)。
+- **小米底包**（必需）：yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包，约 9.9 GB，放到 `work/`。地址 `doctor` 会打印：
+  `https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.5.0.XPZCNXM/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip`。
   文件名里的 `4fe489f542` 是 md5 的前 10 位，`--verify-downloads` 会核对。大文件用 `aria2c -c -x 16 -s 16 <地址>`（可断点续传）。
 - **联想官方 9008 包**（视情况）：平板还是原厂系统时不需要（`pull` 从你自己的备份取）；已刷过别的系统时要用它取联想组件。
   9008 加载器也在这个包里（`xbl_s_devprg_ns.melf`）：`7zz e 联想包.7z -owork/firehose -r xbl_s_devprg_ns.melf`。地址见 [boot-chain.md](boot-chain.md) 或 `doctor` 的输出。

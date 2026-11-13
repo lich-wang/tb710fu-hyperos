@@ -8,7 +8,7 @@ body:
       value: |
         成功的报告和失败的一样重要：它告诉后来的人哪些版本组合能用。
         **不要贴**：备份文件、刷机包、唯一数据分区的内容、密码、完整的芯片序列号（`report` 输出里已经缩写）。
-        新流程见 [测试指南](https://github.com/lich-wang/tb710fu-hyperos/blob/main/docs/testing.md)，旧方案见 [刷机指南](https://github.com/lich-wang/tb710fu-hyperos/blob/main/docs/flash-guide.md)。
+        步骤见 [测试指南](https://github.com/lich-wang/tb710fu-hyperos/blob/main/docs/testing.md)。
   - type: dropdown
     id: result
     attributes:
@@ -28,7 +28,6 @@ body:
       label: 刷机方式
       options:
         - 新流程（tools/tb710fu.py）
-        - 旧方案（刷机指南：移植包 + v3 启动链）
         - 其他（下面说明）
     validations:
       required: true
@@ -68,7 +67,7 @@ body:
     id: report
     attributes:
       label: 工具生成的信息
-      description: 新流程：`python3 tools/tb710fu.py report` 的完整输出（含 ABL 公钥、回滚索引、底层固件版本、刷机包）。旧方案：贴 `edl printgpt` 开头的芯片信息和你用的文件版本
+      description: "`python3 tools/tb710fu.py report` 的完整输出（含 ABL 公钥、回滚索引、底层固件版本、刷机包）"
       render: text
     validations:
       required: true

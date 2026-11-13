@@ -6,8 +6,7 @@
 - **新流程还在测试**：每一步都能在电脑上跑通，刷入命令在模拟环境里测过，**还没有在任何一台真机上写入过**。
   用户是来帮忙做真机测试的。开始前把这件事告诉用户，确认用户接受变砖、清空数据的风险。
 - 本文件是你的**规程**；步骤和背景以 [`docs/testing.md`](docs/testing.md) 为准，原理见 [`docs/boot-chain.md`](docs/boot-chain.md)、[`docs/porting.md`](docs/porting.md)。开始前读完这几份。
-- 用户要用旧方案（移植包 + v3 启动链）时，规程见 [`docs/agent-legacy.md`](docs/agent-legacy.md)。旧方案没有统一脚本，写入步骤直接用 `edl`：
-  那里的规则是只执行刷机指南写明的命令、遇到问题不刷机并提 issue。本文第三节起的流程只针对新流程。
+- 以前的旧方案（HyperOS 3 移植包 + v3 启动链）已不再维护，仓库里也没有了。用户提到旧方案时，说明这一点，改用新流程。
 - 用户通常不是 Android / Linux 底层专家。用用户的语言交流，说清楚每一步做什么、为什么、风险在哪。
 
 ---
@@ -210,7 +209,7 @@
 
 ### 分支与 PR
 - `main` 受保护：不直接推送，不强推，不删除。所有改动走「Issue → 特性分支 → PR → 合并」。
-- 先开 Issue 说明要做什么，再从最新的 `main` 拉分支，命名 `<类型>/<简短描述>`（如 `fix/super-verity`、`docs/flash-guide`、`chore/ci-cache`）。
+- 先开 Issue 说明要做什么，再从最新的 `main` 拉分支，命名 `<类型>/<简短描述>`（如 `fix/super-verity`、`docs/testing`、`chore/ci-cache`）。
 - PR 描述必须写 `Closes #<编号>`（或 `Fixes` / `Resolves`），否则 `require-linked-issue` 检查失败，PR 无法合并。
 - 一个 PR 只做一件事；合并用 `gh pr merge --squash --delete-branch`。
 - 克隆后执行一次 `git config core.hooksPath .githooks`，启用本地防误推钩子（拦截推送到 `main`/`master`）。

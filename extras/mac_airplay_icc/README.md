@@ -27,6 +27,6 @@ Or: System Settings -> Displays -> Xiaomi Pad 8 Pro -> Color profile.
 ## Update
 
 The real cause turned out to be HWUI rendering the receiver window with Skia/Vulkan. With
-`debug.hwui.renderer=skiagl` on the tablet (now built into product; `hyperos/magisk/hwui_gl/`) and **no**
+`debug.hwui.renderer=skiagl` on the tablet (now built into product by `tb710fu.py framework`) and **no**
 profile on the Mac, grey and colour errors drop to 3.9 / 3.9. LUT profiles desaturate saturated colours, so
 they are kept only as an option (`XiaomiPadAirPlayGL_shadows.icc` lifts the shadows slightly).
