@@ -219,13 +219,20 @@ def check_github(r):
     code, out = run_out([gh, 'auth', 'status', '--active', '--hostname', 'github.com'])
     if code != 0 and 'unknown flag' in out:
         code, out = run_out([gh, 'auth', 'status', '--hostname', 'github.com'])
+    if code is None:        # timed out or could not run: not a login problem
+        r.fail(f'gh auth status 没跑完：{out.strip()}', '检查网络 / 代理后重跑 doctor')
+        return
     if code != 0:
-        r.fail('gh 还没登录 github.com', '自己运行 gh auth login，按提示在浏览器里登录（不要把密码或令牌交给 Agent）')
+        r.fail('gh 还没登录 github.com（或登录已失效）：\n       ' + '\n       '.join(out.strip().splitlines()[-3:]),
+               '自己运行 gh auth login，按提示在浏览器里登录（不要把密码或令牌交给 Agent）')
         return
     r.ok('gh 已登录 github.com')
     code, out = run_out([gh, 'repo', 'view', f'github.com/{REPO_SLUG}', '--json', 'hasIssuesEnabled', '--jq', '.hasIssuesEnabled'])
     if code == 0 and out.strip() == 'true':
-        r.ok(f'能访问 {REPO_SLUG} 的 issue')
+        # creating an issue cannot be tested without creating one: a read-only token passes here and fails later
+        r.ok(f'能读取 {REPO_SLUG}，issue 已开启')
+        r.note('能不能提交 issue 要到提交时才知道（例如只读令牌）', 'gh issue create 失败时，把整理好的报告在网页上提交：'
+               f'https://github.com/{REPO_SLUG}/issues/new?template=flash-report.yml')
     else:
         r.fail(f'访问不了 {REPO_SLUG}：{out.strip().splitlines()[-1] if out.strip() else "没有输出"}',
                '检查网络 / 代理，或重新 gh auth login')

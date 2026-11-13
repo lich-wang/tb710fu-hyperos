@@ -122,14 +122,16 @@
 | 进系统了但有功能不正常 | 记下哪些功能不正常，取日志，提 issue；用户不想继续用，按下面的“回到原系统” |
 
 **回到原系统**（只在用户提出、并同意后）：用户拔线 → 长按电源 15–20 秒关机 → 按键重新进 9008（必须重新进：firehose 还在跑时读不到芯片序列号，`restore` 会拒绝）→
-`restore --dry-run`，把计划给用户看 → 用户同意后 `restore`，确认词由用户决定。`restore` 不碰 userdata，第一阶段清过的数据回不来。
+`restore --dry-run --no-reset`（预演完留在 9008，不让平板带着有问题的分区开机），把计划给用户看 → 用户同意后，用户再拔线 → 长按电源 15–20 秒关机 → 按键重新进 9008
+（`restore` 要读芯片序列号，所以还要再进一次）→ `restore`，确认词由用户决定。`restore` 不碰 userdata，第一阶段清过的数据回不来。
 
 ---
 
 ## 六、用 gh 提 issue
 
 **前提**：`doctor` 的 GitHub CLI 一项已通过（装了 `gh`、`gh auth login` 已登录、能访问本仓库）。没通过时请用户自己运行
-`gh auth login` 按提示登录（不要替用户输入密码或令牌）；用户不想用 `gh`，就把整理好的正文交给用户自己在网页上提交。
+`gh auth login` 按提示登录（不要替用户输入密码或令牌）；用户不想用 `gh`，或 `gh issue create` 失败（例如令牌没有提交 issue 的权限），
+就把整理好的标题和正文交给用户，在 [网页](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 上提交。
 
 **一种模板覆盖所有情况**：成功、失败、构建失败、被工具拒绝、只跑到 `check`，都按
 [`.github/ISSUE_TEMPLATE/flash-report.yml`](.github/ISSUE_TEMPLATE/flash-report.yml)（刷机报告）的字段写。
