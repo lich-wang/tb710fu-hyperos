@@ -276,6 +276,16 @@ def plan_lines(rows):
     return '\n'.join(f'  {dst:18} ← {src_desc}' for dst, src_desc in rows)
 
 
+def file_desc(name, info):
+    """How a source file shows in a plan: name, size and the full sha256, so the user can check it."""
+    return f'{name}（{info["bytes"]} 字节，sha256 {info["sha256"]}）'
+
+
+def short_serial(s):
+    """The chip serial as plans print it: output gets pasted into public issues."""
+    return f'{s[:3]}…{s[-3:]}' if s and len(s) > 6 else (s or '?')
+
+
 def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     """Flash stage `first` or `after-setup` of package directory pkg. Returns True when the tablet may reset."""
     m = load_package(pkg)
@@ -313,7 +323,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
             want_head = hashlib.sha256(f.read(HEAD)).hexdigest()
         if hashlib.sha256(src.read_range('super', 0, HEAD)).hexdigest() != want_head:
             raise SourceError('平板上 super 的开头不是这个刷机包第一阶段写的：先做 flash --stage first')
-    rows = [(d, f'{f}（sha256 {m["files"][f]["sha256"][:16]}…）') for d, f in sorted(plan.items())]
+    rows = [(d, file_desc(f, m['files'][f])) for d, f in sorted(plan.items())]
     for d, f in plan.items():
         target(src, d, m['files'][f]['bytes'])          # check every target before writing anything
     wipes = []
@@ -323,7 +333,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
             target(src, n, nb)
             wipes.append((n, nb))
     no_overlap(src, [(d, m['files'][f]['bytes']) for d, f in plan.items()] + wipes)
-    print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {dev.get("chip_serial")}）====\n{plan_lines(rows)}')
+    print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {short_serial(dev.get("chip_serial"))}）====\n{plan_lines(rows)}')
     for n, nb in wipes:
         print(f'  {n:18} ← 清零前 {nb / 2**20:.0f} MiB（恢复出厂，平板上的用户数据全部丢失）')
     print('不写：GPT、另一个槽、底层固件、唯一数据分区（' + '、'.join(UNIQUE) + '）')
@@ -385,7 +395,8 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
     if low:
         raise SourceError(f'备份里镜像的回滚索引低于平板上现在的 {low}（位置: (备份, 设备)）：写回后多半启动不了。'
                           '平板在备份之后升级过系统？用当时版本的联想官方包恢复')
-    print(f'\n==== 写回备份（{bdir}，槽 {slot}）====\n{plan_lines(rows)}')
+    shown = [(part, file_desc(f, st['items'][f'{part}.bin'])) for part, f in rows]
+    print(f'\n==== 写回备份（{bdir}，槽 {slot}）====\n{plan_lines(shown)}')
     print('不写：GPT、另一个槽、底层固件、唯一数据分区；userdata 不动（备份里本来就没有）')
     if dry_run:
         print('\n--dry-run：检查都通过，什么都没写')

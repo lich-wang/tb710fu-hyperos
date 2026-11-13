@@ -215,12 +215,15 @@ def check_github(r):
         r.fail('没有 GitHub CLI（gh）：出问题或刷完要用它到仓库提 issue',
                install_hint('gh', 'gh') + '；其他系统见 https://cli.github.com/')
         return
-    code, out = run_out([gh, 'auth', 'status', '--hostname', 'github.com'])
+    # only the account gh actually uses (an expired, inactive account must not fail this); --active needs gh 2.53+
+    code, out = run_out([gh, 'auth', 'status', '--active', '--hostname', 'github.com'])
+    if code != 0 and 'unknown flag' in out:
+        code, out = run_out([gh, 'auth', 'status', '--hostname', 'github.com'])
     if code != 0:
         r.fail('gh 还没登录 github.com', '自己运行 gh auth login，按提示在浏览器里登录（不要把密码或令牌交给 Agent）')
         return
     r.ok('gh 已登录 github.com')
-    code, out = run_out([gh, 'repo', 'view', REPO_SLUG, '--json', 'hasIssuesEnabled', '--jq', '.hasIssuesEnabled'])
+    code, out = run_out([gh, 'repo', 'view', f'github.com/{REPO_SLUG}', '--json', 'hasIssuesEnabled', '--jq', '.hasIssuesEnabled'])
     if code == 0 and out.strip() == 'true':
         r.ok(f'能访问 {REPO_SLUG} 的 issue')
     else:

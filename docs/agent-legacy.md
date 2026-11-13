@@ -1,7 +1,11 @@
 # 旧方案的 Agent 操作规程（移植包 + v3 启动链）
 
 > 这是**旧方案**（[刷机指南](flash-guide.md)：HyperOS 3 移植包 + v3 启动链 + HyperOS 4 super）的规程，从原来的 `AGENT.md` 移过来。
-> 新流程（`tools/tb710fu.py`）的规程见仓库根目录的 [`AGENT.md`](../AGENT.md)；其中“只用仓库脚本”“遇到问题不刷机、提 issue”两条对旧方案同样适用。
+> 新流程（`tools/tb710fu.py`）的规程见仓库根目录的 [`AGENT.md`](../AGENT.md)。邀请测试的是新流程，新用户请用新流程。
+>
+> 旧方案没有新流程那样的统一脚本，[刷机指南](flash-guide.md)里的写入步骤直接调用 `edl`（`qfil`、`w`）。所以旧方案的规则是：
+> - **只执行刷机指南里写明的命令**，分区名、文件、参数都照指南，不自己编写指南以外的写入命令或脚本，不改仓库代码；
+> - **遇到问题不刷机**：任何检查点不过、报错、看不懂的输出，都停下，不再写入，按 `AGENT.md` 第六节整理报告、经用户同意后提 issue，等维护者回复。
 
 你是一个能执行命令的 AI 编程 Agent，用户请你按旧方案把联想小新 Pad Pro GT（TB710FU）从原装 ZUI 刷成小米澎湃 OS 4（HyperOS 4）。
 本文件是你的**规程**，`docs/flash-guide.md` 是**步骤**，`docs/*.md` 是背景与排错。开始前把这三类文档都读完。
@@ -54,10 +58,10 @@
 |---|---|---|---|
 | 0 环境 | — | `tools/venv/bin/edl --help` 可用；`tools/avb/` 有 avbtool 和 rsa2048/4096 测试密钥；ZUI 版本 = 1.5.04.495 | 版本不对就停止 |
 | 1 备份 | 9008 | `work/backup/gpt` 6 个 LUN；`work/backup/parts` 含全部唯一分区且大小非零 | 不要进入下一步 |
-| 2 移植包 | 1 完成 + 用户确认 | edl 无报错、以 reset 结束 | 报告错误输出；不要重试写入，先让用户决定 |
-| 3 v3 启动链 | 2 完成 | `make_v3_bootchain.py` 输出的 5 个文件 sha256 与指南表格一致；写入后读回一致；进入开机向导 | sha 不一致：输入不是同一个移植包，停下问用户；进 900E：导出转储分析 |
-| 4 Magisk（可选） | HyperOS 3 + USB 调试 | `adb shell su -c id` → uid=0 | 写回 `work/v3/{init_boot,vbmeta}.img` |
-| 5 HyperOS 4 | 3 | super 元数据校验 OK → 向导完成 → 刷 `super_find` → 设置里能登录小米账号 | 卡开机动画：调试版 super + logcat（`docs/hyperos4.md`）；激活锁：说明是在向导里登录了账号；回退：写回移植包的 super |
+| 2 移植包 | 1 完成 + 用户确认 | edl 无报错、以 reset 结束 | 停下，不要重试写入；保存原始输出，提 issue |
+| 3 v3 启动链 | 2 完成 | `make_v3_bootchain.py` 输出的 5 个文件 sha256 与指南表格一致；写入后读回一致；进入开机向导 | sha 不一致：输入不是同一个移植包，停下，不写入；进 900E：停下，提 issue |
+| 4 Magisk（可选） | HyperOS 3 + USB 调试 | `adb shell su -c id` → uid=0 | 停下，提 issue，等维护者回复，不要自己写回镜像 |
+| 5 HyperOS 4 | 3 | super 元数据校验 OK → 向导完成 → 刷 `super_find` → 设置里能登录小米账号 | 卡开机动画、激活锁或其他问题：停下，不再写入；能连 adb 就取 logcat，提 issue，等维护者回复（激活锁通常是在向导里登录了小米账号） |
 
 ## 五、已知故障特征
 
