@@ -18,7 +18,8 @@
 - 开机向导里**不要登录小米账号、不要打开"查找设备"**。
 - 出错时先停下，把输出原样发出来，不要反复重试写入。写入读回不一致时工具会停在 9008（没有复位）：先保存输出、发出来，不要重试写入或开机；
   要写回备份时，拔线 → 长按电源 15–20 秒关机 → 按键重新进 9008 → `restore --dry-run` → `restore`。
-- 用 AI Agent 帮你操作时，让它读 [`AGENT.md`](../AGENT.md)；写入前的确认词（`flash`、`wipe`、`setup-done`、`restore`）应由你自己看过计划后决定。
+- 用 AI Agent 帮你操作时，让它读 [`AGENT.md`](../AGENT.md)：它只用仓库里的脚本，遇到问题停下不刷机，把报告给你看过后用 `gh` 提 issue；
+  写入前的确认词（`flash`、`wipe`、`setup-done`、`restore`）应由你自己看过计划后决定。
 
 ## 1. 准备
 
@@ -28,15 +29,15 @@
 | 电脑 | Linux（构建已在 Ubuntu 上完整跑通）或 macOS（`check` / `backup` / `pull` 实测过，构建步骤用的是同样的工具）。Windows 暂不支持 |
 | 磁盘 | 建议至少 150 GB 空闲：完整备份约 25 GB、联想包 7–8 GB、小米 OTA 约 10 GB、导入后 12 GB、构建中间产物和刷机包约 40 GB、写入时读回 super 约 11 GB |
 | Python | 3.8 以上，只用标准库 |
-| 工具 | `e2fsprogs`、`erofs-utils`（`mkfs.erofs` 需支持 `--tar`）、`lz4`、`7zz` 或 `7z`（读 .7z 包）、[bkerler/edl](https://github.com/bkerler/edl) |
+| 工具 | `e2fsprogs`、`erofs-utils`（`mkfs.erofs` 需支持 `--tar`）、`lz4`、`7zz` 或 `7z`（读 .7z 包）、[bkerler/edl](https://github.com/bkerler/edl)、[GitHub CLI](https://cli.github.com/)（`gh`，已 `gh auth login`，用来提交报告） |
 | AOSP 工具 | `avbtool.py` + `testkey_rsa4096.pem`、`testkey_rsa2048.pem`（AOSP external/avb）放到 `tools/avb/`；`mkbootimg.py`、`unpack_bootimg.py`（AOSP system/tools/mkbootimg，连同 `gki/` 目录）放到 `tools/mkbootimg/` |
 | 9008 加载器 | 联想官方 9008 包里的 `xbl_s_devprg_ns.melf` / `prog_firehose_ddr*.melf`，放到 `work/firehose/`（或 `--loader` 指定） |
 
 ```bash
 # macOS
-brew install e2fsprogs erofs-utils lz4 sevenzip python@3.12
+brew install e2fsprogs erofs-utils lz4 sevenzip python@3.12 gh
 # Debian / Ubuntu
-sudo apt install e2fsprogs erofs-utils lz4 7zip python3
+sudo apt install e2fsprogs erofs-utils lz4 7zip python3 gh
 # edl（两边一样）
 python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl
 ```
@@ -44,7 +45,7 @@ python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/
 ### 环境检查（动平板之前必须过）
 
 ```bash
-python3 tools/tb710fu.py doctor                       # 工具、AOSP 工具和测试密钥、9008 加载器、小米底包、磁盘、USB 驱动
+python3 tools/tb710fu.py doctor                       # 工具、AOSP 工具和测试密钥、9008 加载器、小米底包、磁盘、GitHub CLI、USB 驱动
 python3 tools/tb710fu.py doctor --verify-downloads    # 同上，另外校验小米底包的 md5（下载完做一次）
 python3 tools/tb710fu.py doctor --usb                 # 9008 实操：按提示用按键手动进 9008，只读测试通信，然后复位
 ```

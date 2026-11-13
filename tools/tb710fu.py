@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TB710FU: Xiaomi HyperOS from official sources on a locked bootloader.
 
-  tb710fu.py doctor [--usb]            is this computer ready (tools, downloads, disk, USB); --usb: practise 9008
+  tb710fu.py doctor [--usb]            is this computer ready (tools, downloads, disk, gh, USB); --usb: practise 9008
   tb710fu.py check                     9008 (default): read-only check of the connected tablet
   tb710fu.py check --adb               same over adb (needs root: Magisk, allow Shell)
   tb710fu.py check FILE|DIR|ZIP|7Z...  offline: abl / vbmeta of an official package or of dumped images
@@ -253,7 +253,7 @@ def main():
         w.add_argument('--loader', help='9008 firehose 加载器')
         w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
         w.add_argument('--no-reset', action='store_true', help='写完留在 9008')
-    d = sub.add_parser('doctor', help='刷机前的环境检查：工具、下载、磁盘、USB；--usb 练习手动进 9008 并测试通信')
+    d = sub.add_parser('doctor', help='刷机前的环境检查：工具、下载、磁盘、GitHub CLI、USB；--usb 练习手动进 9008 并测试通信')
     d.add_argument('--usb', action='store_true', help='引导手动进 9008，只读测试 edl 通信后复位')
     d.add_argument('--verify-downloads', action='store_true', help='校验小米底包的 md5（10 GB，要一会儿）')
     d.add_argument('--loader', help='9008 firehose 加载器')

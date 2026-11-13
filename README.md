@@ -54,7 +54,7 @@ tools/          tb710fu.py + tb/（新流程入口，见 #1；目前有 `check` 
 hyperos/        笔按键映射、SELinux 兼容策略、RRO overlay 源码、Magisk 模块
 extras/         Mac 无线副屏色彩测量与描述文件
 docs/           文档
-AGENT.md        给 AI Agent 的刷机操作规程
+AGENT.md        给 AI Agent 的规程（新流程；旧方案见 docs/agent-legacy.md）
 work/           （不入库）你自己设备的备份、底包、构建产物
 ```
 
@@ -63,7 +63,7 @@ work/           （不入库）你自己设备的备份、底包、构建产物
 完整步骤：**[docs/flash-guide.md](docs/flash-guide.md)**——从联想官方 ZUI 1.5.04.495 开始，进 9008 备份，
 线刷 HyperOS 3 移植包，换 v3 启动链，构建并刷入 HyperOS 4。
 
-> **推荐用 AI Agent 来刷**：让一个能执行命令的 AI 编程 Agent 读取 [`AGENT.md`](AGENT.md) 和刷机指南，
+> **推荐用 AI Agent 来刷**：让一个能执行命令的 AI 编程 Agent 读取 [`docs/agent-legacy.md`](docs/agent-legacy.md) 和刷机指南，
 > 由它执行命令、校验结果，需要你动手时它会停下来告诉你。
 
 ### 新流程（测试中，邀请真机测试）
@@ -72,6 +72,7 @@ work/           （不入库）你自己设备的备份、底包、构建产物
 在你自己的电脑上构建一个只属于你这台平板的刷机包，再用 9008 写入（每一步都有检查，写入前要确认，写完逐个读回）。
 构建已完整跑通，**真机写入还没测过**。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
 结果用 [刷机报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 提交（成功、失败、只跑到 `check` 都有用）。
+用 AI Agent 帮你做时，让它先读 [`AGENT.md`](AGENT.md)：它只用仓库里的脚本，遇到问题不刷机，整理好报告给你看过后用 `gh` 提 issue。
 
 ## 相关项目
 

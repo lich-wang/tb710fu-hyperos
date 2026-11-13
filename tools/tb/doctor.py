@@ -1,6 +1,6 @@
 """doctor: is this computer ready, are the downloads there, and can the user put the tablet into 9008?
 
-Read only. `doctor` checks the computer, the tools and the downloads; `doctor --usb` then walks the user through
+Read only. `doctor` checks the computer, the tools, the downloads and the GitHub CLI (reports go to the issues); `doctor --usb` then walks the user through
 entering 9008 by hand (the button combination), confirms that edl can talk to the tablet (printgpt, read only)
 and resets it. Nothing is written to the tablet.
 """
@@ -13,6 +13,7 @@ AVB_DIR, MKB_DIR = os.path.join(TOOLS, 'avb'), os.path.join(TOOLS, 'mkbootimg')
 TESTKEY_SHA1 = {'testkey_rsa4096.pem': '2597c218aae470a130f61162feaae70afd97f011',
                 'testkey_rsa2048.pem': 'cdbb77177f731920bbe0a0f94f84d9038ae0617d'}
 MIN_FREE = 150 << 30
+REPO_SLUG = 'lich-wang/tb710fu-hyperos'
 
 # yupei full OTA verified by this project: file name, size, md5 prefix (the 10 hex digits in its name), address
 XIAOMI = [('yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip', 9922261403, '4fe489f542',
@@ -204,6 +205,39 @@ def check_disk(r):
         r.fail(msg + f'，建议至少 {MIN_FREE >> 30} GiB', '备份 25 GB + 下载 20 GB + 构建 40 GB + 读回 11 GB，还要留余量')
 
 
+# ---------------------------------------------------------------- GitHub
+
+def check_github(r):
+    """Flash reports and problems go to the repository's issues through the GitHub CLI."""
+    print('\n[GitHub（提交刷机报告和问题）]')
+    gh = which_any('gh')
+    if not gh:
+        r.fail('没有 GitHub CLI（gh）：出问题或刷完要用它到仓库提 issue',
+               install_hint('gh', 'gh') + '；其他系统见 https://cli.github.com/')
+        return
+    # only the account gh actually uses (an expired, inactive account must not fail this); --active needs gh 2.53+
+    code, out = run_out([gh, 'auth', 'status', '--active', '--hostname', 'github.com'])
+    if code != 0 and 'unknown flag' in out:
+        code, out = run_out([gh, 'auth', 'status', '--hostname', 'github.com'])
+    if code is None:        # timed out or could not run: not a login problem
+        r.fail(f'gh auth status 没跑完：{out.strip()}', '检查网络 / 代理后重跑 doctor')
+        return
+    if code != 0:
+        r.fail('gh 还没登录 github.com（或登录已失效）：\n       ' + '\n       '.join(out.strip().splitlines()[-3:]),
+               '自己运行 gh auth login，按提示在浏览器里登录（不要把密码或令牌交给 Agent）')
+        return
+    r.ok('gh 已登录 github.com')
+    code, out = run_out([gh, 'repo', 'view', f'github.com/{REPO_SLUG}', '--json', 'hasIssuesEnabled', '--jq', '.hasIssuesEnabled'])
+    if code == 0 and out.strip() == 'true':
+        # creating an issue cannot be tested without creating one: a read-only token passes here and fails later
+        r.ok(f'能读取 {REPO_SLUG}，issue 已开启')
+        r.note('能不能提交 issue 要到提交时才知道（例如只读令牌）', 'gh issue create 失败时，把整理好的报告在网页上提交：'
+               f'https://github.com/{REPO_SLUG}/issues/new?template=flash-report.yml')
+    else:
+        r.fail(f'访问不了 {REPO_SLUG}：{out.strip().splitlines()[-1] if out.strip() else "没有输出"}',
+               '检查网络 / 代理，或重新 gh auth login')
+
+
 # ---------------------------------------------------------------- USB
 
 def check_usb_host(r):
@@ -284,6 +318,7 @@ def run(usb=False, verify=False, loader=None):
     check_aosp(r)
     check_downloads(r, verify, loader)
     check_disk(r)
+    check_github(r)
     check_usb_host(r)
     if usb:
         usb_practice(r, loader)
