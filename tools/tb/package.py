@@ -4,6 +4,8 @@ Output: work/out/<Xiaomi version>-<chip serial>/
   boot.img init_boot.img dtbo.img vendor_boot.img vbmeta.img      written to the device's current slot
   vbmeta_system_nofind.img + super_nofind.img                     first boot / setup wizard (no Find Device app)
   vbmeta_system_find.img   + super_find.img                       after the setup wizard
+  abl.img                  only when the device's ABL is Lenovo's stock ZUXOS 1.5.04.495 (verifies with Lenovo's key):
+                           the CN 17.0.04.279 ABL (tb710fu.py abl), written to the current slot in the first stage
   manifest.json   sha256 of every file, the inputs (Lenovo / Xiaomi versions), the device it is bound to
                   (chip serial, HWID, OEM PK hash, slot, rollback indexes, super size) and the write plan
 super holds the current slot's logical partitions (the other slot's are empty); it is written from the start
@@ -12,7 +14,7 @@ must match the image it came from.
 """
 import glob, hashlib, json, os, re, shutil, sys, tempfile, time
 
-from . import bootchain, layout
+from . import abl as abl_mod, bootchain, layout
 from .lenovo import fingerprints
 from .backup import file_sha256
 from .sources import TOOLS, WORK, SourceError
@@ -125,6 +127,18 @@ def _assemble(out, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir):
     for n in COMMON:
         copy_checked(os.path.join(find_dir, f'{n}.img'), os.path.join(out, f'{n}.img'), bc['find']['images'][n])
         files[f'{n}.img'] = None
+    abl = None
+    if prof.get('testkey') == 'needs_abl':
+        # the stock 495 ABL verifies with Lenovo's key: the test-key chain needs the CN 279 ABL in the same slot
+        path, info = abl_mod.load()
+        now = (prof.get('firmware') or {}).get('abl') or {}
+        if now.get('bytes') != info['bytes'] or not now.get('sha256') or now.get('partition') != f'abl{slot}':
+            raise SourceError(f'设备档案里的 abl 分区（{now.get("partition")}，{now.get("bytes")} 字节）和要写的 abl'
+                              f'（abl{slot}，{info["bytes"]} 字节）对不上：重跑 tb710fu.py check')
+        shutil.copyfile(path, os.path.join(out, 'abl.img'))
+        files['abl.img'] = None
+        abl = {'replace': True, 'before_sha256': now['sha256'], 'after_sha256': info['sha256'],
+               'source': info['source']}
     supers = {}
     for k, d in (('nofind', nofind_dir), ('find', find_dir)):
         copy_checked(os.path.join(d, 'vbmeta_system.img'), os.path.join(out, f'vbmeta_system_{k}.img'),
@@ -159,7 +173,7 @@ def _assemble(out, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir):
         'created': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
         'device': {'chip_serial': dev.get('chip_serial'), 'hwid': dev.get('hwid'), 'pk_hash': dev.get('pk_hash'),
                    'slot': slot, 'rollback': bc['find']['rollback'], 'super_bytes': super_size,
-                   'profile_created': prof.get('created')},
+                   'profile_created': prof.get('created'), 'abl': abl},
         'inputs': {
             'xiaomi': {'version': fwv['find']['version'], 'fingerprint': None},
             'lenovo': {'source': lenovo.get('source'), 'package': lenovo.get('package'),
@@ -172,6 +186,7 @@ def _assemble(out, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir):
         # what flash writes (the device's current slot only); anything else, the unique partitions above all,
         # is never written
         'plan': {'first': {f'{n}{slot}': f'{n}.img' for n in COMMON} |
+                          ({f'abl{slot}': 'abl.img'} if abl else {}) |
                           {f'vbmeta_system{slot}': 'vbmeta_system_nofind.img', 'super': 'super_nofind.img'},
                  'after_setup': {f'vbmeta_system{slot}': 'vbmeta_system_find.img', 'super': 'super_find.img'},
                  'never': list(UNIQUE)},
@@ -191,6 +206,8 @@ def report(out, m):
         print(f'{f:26} {i["bytes"] / 2**20:9.1f} MiB  sha256 {i["sha256"][:16]}…')
     d = m['device']
     print(f'绑定设备：芯片序列号 {d["chip_serial"]}  HWID {d["hwid"]}  槽 {d["slot"]}  回滚 {d["rollback"]}')
+    if d.get('abl'):
+        print(f'abl：设备上是联想原厂 495（sha256 {d["abl"]["before_sha256"][:16]}…），第一阶段换成 {d["abl"]["source"]}')
     print(f'小米 {m["inputs"]["xiaomi"]["version"]}；联想 {m["inputs"]["lenovo"]["system"]}')
     if m['inputs'].get('debug'):
         print('⚠ 调试版：adb 不需要授权、系统可调试。排查完换回正式版')

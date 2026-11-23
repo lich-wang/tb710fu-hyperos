@@ -5,7 +5,7 @@ Read only. See tools/tb710fu.py check.
 """
 import json, os, re, shutil, subprocess, tempfile, time, zipfile
 
-from . import avb, layout
+from . import abl as abl_mod, avb, layout
 from .sources import WORK, SourceError, sha256
 
 SCHEMA = 1
@@ -140,13 +140,13 @@ def check_firmware(src, slot, prof):
         prof['firmware_match']['skipped'] = True
         prof['warnings'].append(f'读不到参考固件清单 {TESTED_FIRMWARE}，没和参考设备比对底层固件')
     abl = 'abl' + slot if 'abl' + slot in data else 'abl'
-    prof['abl'] = avb.check_abl(data.get(abl, b''))
+    prof['abl'] = abl_mod.classify(data.get(abl, b''))
 
 
 def check_abl_only(src, slot, prof):
     n = 'abl' + slot if 'abl' + slot in src.parts else 'abl'
     d = src.read([n]).get(n, b'')
-    prof['abl'] = avb.check_abl(d)
+    prof['abl'] = abl_mod.classify(d)
     prof['firmware'] = {'abl': {'partition': n, 'bytes': len(d), 'sha256': sha256(d), 'sha256_trim': trim_sha(d),
                                 'version': avb.image_version(d)}}
 
@@ -194,6 +194,12 @@ def verdict(prof):
     abl = prof.get('abl') or {}
     if abl.get('trusts_testkey') is True:
         prof['testkey'] = 'trusted'
+    elif abl.get('trusts_testkey') is False and abl.get('replace'):
+        # the stock 495 ABL: verifies with Lenovo's key, but the tablet takes the AOSP-only 279 ABL (abl.py)
+        prof['testkey'] = 'needs_abl'
+        prof['warnings'].append(f'ABL 是{abl["known"]}：里面虽然有测试公钥，但校验 vbmeta 用的是联想自己的密钥。'
+                                '刷机包会把当前槽的 abl 换成只认测试密钥的 CN 17.0.04.279 abl'
+                                '（先跑 tb710fu.py abl <联想官方 CN 17.0.04.279 线刷包>）')
     elif abl.get('trusts_testkey') is False:
         prof['testkey'] = 'not_trusted'
         prof['errors'].append('ABL 只信任非测试密钥（多半是联想私钥）：锁着 BL 时 testkey 签名的镜像不会被接受')
@@ -279,7 +285,10 @@ def report(prof):
     elif fm and fm['compared']:
         print(f'底层固件与 {fm["set"]}：{fm["matched"]}/{fm["compared"]} 个分区一致')
     print('\n==== 结论 ====')
-    if prof['ok']:
+    if prof['ok'] and prof.get('testkey') == 'needs_abl':
+        print('✅ 可以继续：ABL 是联想原厂 495，刷机包会把当前槽 abl 换成只认测试密钥的 CN 17.0.04.279 abl，'
+              '启动链按上面的回滚索引用 testkey 重签。')
+    elif prof['ok']:
         print('✅ 可以继续：ABL 信任 AOSP 测试密钥。构建时启动链会按上面的回滚索引用 testkey 重签。')
     else:
         print('❌ 不能继续：')
@@ -358,14 +367,16 @@ def check_files(paths):
         data = files[name]
         print(f'\n[{name}]  {len(data)} 字节  sha256 {sha256(data)[:16]}…')
         if data[:4] == b'\x7fELF' or ABL_RE.match(os.path.basename(name)):
-            r = avb.check_abl(data)
+            r = abl_mod.classify(data)
             if r['signer']:
                 print(f'  abl 镜像签名证书：{", ".join(r["signer"])}')
             if r['error']:
                 print(f'  ⚠ {r["error"]}')
             for k in r['keys']:
                 print(f'  ABL 内置 AVB 根公钥：RSA{k["bits"]}  {avb.key_str(k)}')
-            trusts.append((name, r['trusts_testkey']))
+            if r.get('replace'):
+                print(f'  {r["known"]}：校验 vbmeta 用的是{r["effective"]}；刷机时换成 CN 17.0.04.279 abl')
+            trusts.append((name, 'replace' if r.get('replace') else r['trusts_testkey']))
             continue
         vb = avb.find_vbmeta(data)
         if vb is None:
@@ -383,7 +394,8 @@ def check_files(paths):
         if v['hashed']:
             print(f'  直接校验：{" ".join(v["hashed"])}')
     print('\n==== 结论 ====')
-    word = {True: '✅ 信任 AOSP 测试密钥', False: '❌ 只信任非测试密钥（多半是联想私钥）', None: '❓ 判断不了'}
+    word = {True: '✅ 信任 AOSP 测试密钥', False: '❌ 只信任非测试密钥（多半是联想私钥）', None: '❓ 判断不了',
+            'replace': '⚠ 联想原厂 495：只认联想自己的密钥，刷机时要换成 CN 17.0.04.279 abl（tb710fu.py abl）'}
     for name, tr in trusts:
         print(f'{name}：{word[tr]}')
     if not trusts:
@@ -391,6 +403,9 @@ def check_files(paths):
         return False
     if all(tr is True for _, tr in trusts):
         print('✅ 所有 abl 都信任 AOSP 测试密钥。')
+        return True
+    if all(tr in (True, 'replace') for _, tr in trusts):
+        print('✅ 可以用：联想原厂 495 的 abl 在刷机时换成 CN 17.0.04.279 abl。')
         return True
     print('❌ 不是所有 abl 都信任 AOSP 测试密钥（只看要刷的那个槽时，单独检查那个槽的 abl）。')
     return False

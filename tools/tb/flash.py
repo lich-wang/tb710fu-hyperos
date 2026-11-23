@@ -2,24 +2,27 @@
 
 Stages (manifest.json "plan"):
   first        boot, init_boot, dtbo, vendor_boot, vbmeta, vbmeta_system of the current slot + super without Find
-               Device; then, separately confirmed, metadata and the start of userdata are zeroed (factory reset)
+               Device; then, separately confirmed, metadata and the start of userdata are zeroed (factory reset).
+               When the package replaces the stock 495 ABL (manifest device.abl), also abl of the current slot: only
+               the pinned CN 279 ABL (abl.py), only over the exact ABL check saw (or over itself on a re-run).
   after-setup  vbmeta_system + super with Find Device; data kept. Only allowed when the tablet is in stage first.
-restore        boot chain of the current slot + super from the device's own full backup.
+restore        boot chain of the current slot (with recovery and abl) + super from the device's own full backup.
 
-What is never done: writing the GPT, the other slot, firmware below the boot chain, or any partition whose sectors
+What is never done: writing the GPT, the other slot, firmware below the boot chain (abl only as above), or any
+partition whose sectors
 overlap a unique-data partition (persist, modemst1/2, fsg, fsc, devinfo, frp, keystore, ssd, secdata,
 uefivarstore, cdt, ddr, proinfo, lenovolock). Every write is read back; a mismatch stops at once and leaves the
 tablet in 9008 (no reset). The partition table is compared again after the writes.
 """
 import hashlib, json, os, shutil, tempfile, time
 
-from . import avb, backup as backup_mod, check, layout
+from . import abl as abl_mod, avb, backup as backup_mod, check, layout
 from .sources import WORK, SourceError
 
 UNIQUE = ('persist', 'modemst1', 'modemst2', 'fsg', 'fsc', 'devinfo', 'frp', 'keystore', 'ssd', 'secdata',
           'uefivarstore', 'cdt', 'ddr', 'proinfo', 'lenovolock')
 BOOT_CHAIN = ('boot', 'init_boot', 'dtbo', 'vendor_boot', 'vbmeta', 'vbmeta_system')
-RESTORE_CHAIN = BOOT_CHAIN + ('recovery',)
+RESTORE_CHAIN = BOOT_CHAIN + ('recovery', 'abl')
 WIPE = {'metadata': None, 'userdata': 64 << 20}     # bytes zeroed from the start (None = the whole partition)
 CHUNK = 1 << 22
 
@@ -303,9 +306,21 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
         raise SourceError(f'刷机包的回滚索引低于平板上现在的镜像 {low}（位置: (包, 设备)）：会启动不了，重建刷机包')
     plan = m['plan']['first' if stage == 'first' else 'after_setup']
     allowed = {f'{n}{slot}' for n in BOOT_CHAIN} | {'super'}
+    abl_part = f'abl{slot}'
+    if stage == 'first' and dev.get('abl'):
+        allowed.add(abl_part)
     bad = [d for d in plan if d not in allowed]
     if bad:
         raise SourceError(f'manifest 的写入计划里有不允许写的分区 {bad}')
+    if abl_part in plan:
+        # only the pinned ABL, and only over the stock ABL check saw (or over itself when a first run was cut short)
+        f = m['files'][plan[abl_part]]
+        target(src, abl_part, f['bytes'])
+        if f['bytes'] != abl_mod.PINNED['bytes'] or f['sha256'] != abl_mod.PINNED['sha256']:
+            raise SourceError('刷机包里的 abl 不是预期的 CN 17.0.04.279 abl：重新打包')
+        cur = hashlib.sha256(src.read_range(abl_part, 0, f['bytes'])).hexdigest()
+        if cur not in (dev['abl']['before_sha256'], abl_mod.PINNED['sha256']):
+            raise SourceError(f'平板上的 {abl_part}（sha256 {cur[:16]}…）不是 check 时读到的那份：重跑 check 再打包')
     pkg_id = file_sha256(os.path.join(pkg, 'manifest.json'))
     if stage == 'after-setup':
         # only after a complete stage first of this very package on this tablet
@@ -336,7 +351,11 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {short_serial(dev.get("chip_serial"))}）====\n{plan_lines(rows)}')
     for n, nb in wipes:
         print(f'  {n:18} ← 清零前 {nb / 2**20:.0f} MiB（恢复出厂，平板上的用户数据全部丢失）')
-    print('不写：GPT、另一个槽、底层固件、唯一数据分区（' + '、'.join(UNIQUE) + '）')
+    if abl_part in plan:
+        print(f'  （{abl_part}：平板上是联想原厂 495 的 abl，只认联想自己的密钥；换成 {abl_mod.PINNED["source"]}。'
+              f'原来的在备份里，restore 会写回）')
+    print('不写：GPT、另一个槽、' + ('abl 以外的' if abl_part in plan else '') + '底层固件、唯一数据分区（'
+          + '、'.join(UNIQUE) + '）')
     if dry_run:
         print('\n--dry-run：检查都通过，什么都没写')
         return False
@@ -397,7 +416,7 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
                           '平板在备份之后升级过系统？用当时版本的联想官方包恢复')
     shown = [(part, file_desc(f, st['items'][f'{part}.bin'])) for part, f in rows]
     print(f'\n==== 写回备份（{bdir}，槽 {slot}）====\n{plan_lines(shown)}')
-    print('不写：GPT、另一个槽、底层固件、唯一数据分区；userdata 不动（备份里本来就没有）')
+    print('不写：GPT、另一个槽、abl 以外的底层固件、唯一数据分区；userdata 不动（备份里本来就没有）')
     if dry_run:
         print('\n--dry-run：检查都通过，什么都没写')
         return False

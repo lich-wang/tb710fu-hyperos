@@ -80,9 +80,10 @@
 | 0 | `doctor` | | | 结论 `✅ 电脑这边准备好了`。不过就按每项的 `→` 处理，GitHub CLI 一项也要过（第六节要用） |
 | 0 | 用户下载小米底包（`doctor` 打印的地址），之后 `doctor --verify-downloads` | | | 小米底包"大小、md5 都对" |
 | 0 | `doctor --usb` | 用户按键 | | `edl 能和平板通信` + `已让平板退出 9008 重启`：用户会手动进 9008 了 |
-| 1 | `check` | ✔ | | ABL 信任 AOSP 测试密钥（不信任就到此为止，提报告） |
+| 1 | `check` | ✔ | | ABL 信任 AOSP 测试密钥，或判为"联想原厂 495"（要换 abl，见第 3 步后的 `abl`）；不信任就到此为止，提报告 |
 | 2 | `backup` | ✔ | | 完整备份结束且核对通过；提醒用户另存一份 |
 | 3 | `pull`（平板已不是原厂系统：`pull --package <联想国行官方包.7z>`） | | | 联想组件取出、检查通过 |
+| 3 | 只在 `check` 判为"联想原厂 495"时：用户下载联想官方 CN 17.0.04.279 线刷包（地址见 `docs/boot-chain.md`），`abl <包>` | | | `work/abl/abl.img` 取出、sha256 核对通过 |
 | 4 | `import work/<小米底包>.zip` | | | 导入完成（提示"未验证的版本"就停下，不要自己加 `--force`） |
 | 5 | `vendor` → `framework` → `framework --no-finddevice` | | | 每步结尾的检查全过 |
 | 6 | `bootchain --framework-dir work/build/framework/<版本>`，再对 `<版本>-nofind` 跑一次 | | | 两份启动链都签好、验证通过 |
@@ -102,9 +103,9 @@
 ## 四、写入前（`flash`、`flash --stage after-setup`、`restore`）
 
 1. 先跑对应的 `--dry-run`，把打印的写入计划（每个目标分区，以及源文件、字节数、完整 sha256）原样给用户看，说明后果：
-   - 第一阶段写当前槽的启动链（`boot`、`init_boot`、`dtbo`、`vendor_boot`、`vbmeta`、`vbmeta_system`）和 `super`，确认 `wipe` 后清空用户数据；
+   - 第一阶段写当前槽的启动链（`boot`、`init_boot`、`dtbo`、`vendor_boot`、`vbmeta`、`vbmeta_system`）和 `super`，原厂 495 还写当前槽的 `abl`，确认 `wipe` 后清空用户数据；
    - 第二阶段写 `vbmeta_system` 和 `super`（换成带查找设备的版本），数据保留；
-   - `restore` 用这台平板自己的备份写回当前槽的启动链（含 `recovery`）和 `super`，userdata 不动。
+   - `restore` 用这台平板自己的备份写回当前槽的启动链（含 `recovery`、`abl`）和 `super`，userdata 不动。
 2. 用户在对话里明确说同意，再运行真正的命令；工具要确认词时，问用户输入什么，照用户说的输入。
 3. 写完工具会读回比对。全部一致才算成功；有任何不一致，见下一节。
 
