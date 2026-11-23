@@ -95,6 +95,14 @@ python3 tools/tb710fu.py restore --dry-run
 python3 tools/tb710fu.py restore        # 用你这台平板自己的备份写回启动链和 super（不碰 userdata）
 ```
 
+想从联想原厂系统重新开始，或者 `restore` 因为分区表变了用不了：`restore-stock` 用联想官方原厂 ZUXOS 1.5.04.495 线刷包恢复
+（会清空数据，不写唯一数据分区；也要先有这台平板的完整备份；包有解压密码，本仓库不提供），详见 [boot-chain.md](boot-chain.md) 的"恢复联想官方原厂"。已在参考平板上真机恢复成功过。
+
+```bash
+python3 tools/tb710fu.py restore-stock --dry-run --package TB710_ZUXOS_1.5.04.495_Tool.7z
+python3 tools/tb710fu.py restore-stock --package TB710_ZUXOS_1.5.04.495_Tool.7z
+```
+
 ## 3. 要测什么、怎么报告
 
 请用 [**刷机报告**](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 模板开 issue，

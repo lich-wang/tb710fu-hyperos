@@ -5,7 +5,7 @@
   tb710fu.py check                     9008 (default): read-only check of the connected tablet
   tb710fu.py check --adb               same over adb (needs root: Magisk, allow Shell)
   tb710fu.py check FILE|DIR|ZIP|7Z...  offline: abl / vbmeta of an official package or of dumped images
-  tb710fu.py backup                    9008: full read-only backup (GPT + everything but userdata), resumable
+  tb710fu.py backup                    9008: full read-only backup (GPT + all but userdata and non-super partitions of 4 GiB or more), resumable
   tb710fu.py pull                      Lenovo stock parts for the build, from a full backup of the tablet
   tb710fu.py pull --package ZIP|7Z|DIR  ... or from an official Lenovo 9008 package
   tb710fu.py import OTA.zip            Xiaomi Pad 8 (yupei) parts from the official Xiaomi full OTA package
@@ -17,6 +17,7 @@
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
   tb710fu.py flash [--stage first|after-setup]   9008: write the package (asks first; reads every write back)
   tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
+  tb710fu.py restore-stock             9008: back to Lenovo's stock ZUXOS 1.5.04.495 (also needs the tablet's full backup)
   tb710fu.py report                    text for the flash report issue (versions, ABL, package; read only)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
@@ -31,7 +32,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import abl, backup, bootchain, check, doctor, flash, framework, lenovo, package, report, sources, vendor, xiaomi  # noqa: E402
+from tb import abl, backup, bootchain, check, doctor, flash, framework, lenovo, package, report, sources, stock, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -193,6 +194,10 @@ def cmd_restore(a):
     return write_cmd(a, lambda src: flash.restore(src, a.backup, dry_run=a.dry_run))
 
 
+def cmd_restore_stock(a):
+    return write_cmd(a, lambda src: stock.run(src, a.package, dry_run=a.dry_run, slot_b=a.slot_b, backup_dir=a.backup))
+
+
 def cmd_package(a):
     try:
         out, m = package.build(a.find, a.nofind, allow_debug=a.allow_debug)
@@ -220,7 +225,7 @@ def main():
     c.add_argument('--loader', help='9008 firehose 加载器')
     c.add_argument('--no-firmware', action='store_true', help='不读底层固件做指纹（更快）')
     c.add_argument('--no-reset', action='store_true', help='检查完留在 9008')
-    b = sub.add_parser('backup', help='9008 完整只读备份（GPT + 除 userdata 外所有分区），断了可以接着读')
+    b = sub.add_parser('backup', help='9008 完整只读备份（GPT + 所有分区，不含 userdata 和 4 GiB 及以上的非 super 分区），断了可以接着读')
     b.add_argument('--out', help='备份目录（默认 work/backup/<芯片序列号>-<时间>，有没备份完的会接着读）')
     b.add_argument('--loader', help='9008 firehose 加载器')
     b.add_argument('--no-reset', action='store_true', help='备份完留在 9008')
@@ -266,6 +271,14 @@ def main():
         w.add_argument('--loader', help='9008 firehose 加载器')
         w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
         w.add_argument('--no-reset', action='store_true', help='写完留在 9008')
+    r = sub.add_parser('restore-stock', help='9008 恢复成联想官方原厂 495（要先有这台平板的完整备份；不写唯一数据分区，会清空数据）')
+    r.add_argument('--package', help='已经下载好的 TB710_ZUXOS_1.5.04.495_Tool.7z（默认下载到 work/stock/）')
+    r.add_argument('--loader', help='9008 firehose 加载器')
+    r.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
+    r.add_argument('--backup', help='这台平板的完整备份目录（默认最新的一份）')
+    r.add_argument('--slot-b', action='store_true',
+                   help='只把 B 槽（底层固件 + 启动链）也写成原厂；分区表要已是原厂的，不清数据')
+    r.add_argument('--no-reset', action='store_true', help='写完留在 9008')
     d = sub.add_parser('doctor', help='刷机前的环境检查：工具、下载、磁盘、GitHub CLI、USB；--usb 练习手动进 9008 并测试通信')
     d.add_argument('--usb', action='store_true', help='引导手动进 9008，只读测试 edl 通信后复位')
     d.add_argument('--verify-downloads', action='store_true', help='校验小米底包的 md5（10 GB，要一会儿）')
@@ -274,7 +287,7 @@ def main():
     a = ap.parse_args()
     return {'check': cmd_check, 'abl': cmd_abl, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
             'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain,
-            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore,
+            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore, 'restore-stock': cmd_restore_stock,
             'report': lambda a: 0 if report.run() else 1,
             'doctor': lambda a: 0 if doctor.run(a.usb, a.verify_downloads, a.loader) else 1}[a.cmd](a)
 
