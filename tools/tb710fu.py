@@ -214,7 +214,7 @@ def main():
     c.add_argument('--loader', help='9008 firehose 加载器')
     c.add_argument('--no-firmware', action='store_true', help='不读底层固件做指纹（更快）')
     c.add_argument('--no-reset', action='store_true', help='检查完留在 9008')
-    b = sub.add_parser('backup', help='9008 完整只读备份（GPT + 除 userdata 外所有分区），断了可以接着读')
+    b = sub.add_parser('backup', help='9008 完整只读备份（GPT + 所有分区，不含 userdata 和 4 GiB 及以上的非 super 分区），断了可以接着读')
     b.add_argument('--out', help='备份目录（默认 work/backup/<芯片序列号>-<时间>，有没备份完的会接着读）')
     b.add_argument('--loader', help='9008 firehose 加载器')
     b.add_argument('--no-reset', action='store_true', help='备份完留在 9008')

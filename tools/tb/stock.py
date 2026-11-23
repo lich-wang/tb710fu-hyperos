@@ -1,6 +1,8 @@
 """restore-stock: put a TB710FU back to Lenovo's stock ZUXOS 1.5.04.495 over 9008 (rescue, or starting over).
 
-This is the fallback for when the tablet's own backup is gone; with a backup, `restore` is the way back.
+The fallback when `restore` cannot be used (e.g. the partition table has changed since the backup). It still needs
+the tablet's own full backup (backup.py; it holds every unique-data partition, not userdata and not other
+partitions of 4 GiB or more).
 
 1. The Lenovo service flash package (stock_495.json: name, size, sha256, download address) is downloaded or taken
    from --package, and checked. It is password protected: the password is not in this repository; the user types
@@ -348,9 +350,18 @@ def full_backup(serial, src, backup_dir=None):
                       '再恢复原厂。原厂包里的 persist 等是空白模板，平板自己的这些数据只能靠备份找回')
 
 
-def check_rollback(src, slot):
+def check_rollback(src, slots=('_a', '_b')):
     """Images on the tablet must not carry higher rollback indexes than stock (stock would not boot). Each index is
-    compared as soon as it is read: a higher one refuses at once; one that cannot be read is only a warning."""
+    compared as soon as it is read: a higher one refuses at once; one that cannot be read is only a warning.
+
+    The counters the bootloader keeps (in RPMB, behind the TEE) cannot be read over 9008. They only ever rise to the
+    index of an image that verified and booted, so the images of both slots are the evidence available here; a
+    higher counter left by a system no longer on either slot cannot be seen."""
+    for slot in slots:
+        _check_rollback_slot(src, slot)
+
+
+def _check_rollback_slot(src, slot):
     stock_rb = {int(k): v for k, v in TABLE['avb']['rollback'].items()}
 
     def compare(loc, idx, what):
@@ -394,7 +405,7 @@ def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False, backup
     bdir = full_backup(serial, src, backup_dir)          # both paths write: a full backup comes first
     print(f'这台平板的完整备份：{bdir}（已核对）')
     # rollback indexes live in the device, not in a slot: both paths write older stock images
-    check_rollback(src, src.slot or '_a')
+    check_rollback(src)
     if slot_b:
         return run_slot_b(src, serial, img, p, dry_run, assume_yes)
     print(f'\n==== 恢复联想官方 {TABLE["version"]}（平板 {short_serial(serial)}）====')
