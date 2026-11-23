@@ -393,9 +393,10 @@ def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False, backup
     p = plan(src, img)
     bdir = full_backup(serial, src, backup_dir)          # both paths write: a full backup comes first
     print(f'这台平板的完整备份：{bdir}（已核对）')
+    # rollback indexes live in the device, not in a slot: both paths write older stock images
+    check_rollback(src, src.slot or '_a')
     if slot_b:
         return run_slot_b(src, serial, img, p, dry_run, assume_yes)
-    check_rollback(src, src.slot or '_a')
     print(f'\n==== 恢复联想官方 {TABLE["version"]}（平板 {short_serial(serial)}）====')
     for g in p['gpt']:
         print(f'  LUN{g["lun"]} 分区表 ← 原厂（按 {g["nds"]} 个扇区算好；去掉 {g["removed"] or "无"}，'
