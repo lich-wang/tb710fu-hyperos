@@ -1,4 +1,4 @@
-mkbootimg.py, unpack_bootimg.py and gki/generate_gki_certificate.py are copied unchanged from AOSP
+mkbootimg.py, unpack_bootimg.py, repack_bootimg.py and gki/generate_gki_certificate.py are copied unchanged from AOSP
 platform/system/tools/mkbootimg (see ../THIRD_PARTY.md). Each file carries this notice:
 
 Copyright 2015, 2018, 2021 The Android Open Source Project
