@@ -379,6 +379,9 @@ def _check_rollback_slot(src, slot):
         print(f'⚠ 平板上的 vbmeta{slot} 没有 AVB 签名（系统坏了？）。按原厂 {TABLE["version"]} 继续')
         return
     compare(v['rollback_location'], v['rollback'], f'vbmeta{slot}')
+    declared = {c['partition'] for c in v['chains']}
+    for missing in sorted({'boot', 'vbmeta_system'} - declared):
+        print(f'⚠ vbmeta{slot} 没有链到 {missing}，{missing}{slot} 的回滚索引没比较')
     for c in v['chains']:
         if c['partition'] not in ('boot', 'vbmeta_system'):
             continue
