@@ -226,9 +226,16 @@ def plan(src, img):
         cur_back = src_read(src, lun, nds - 5, 5)
         if cur_main == main and cur_back == back:
             continue
+        removed, added = sorted(set(dev) - set(gpts[lun])), sorted(set(gpts[lun]) - set(dev))
+        moved = sorted(n for n in set(dev) & set(gpts[lun]) if dev[n] != gpts[lun][n])
+        # Only LUN0 may change its layout (ArmadaOS adds partitions there and shrinks userdata). LUN1-5 may differ
+        # from stock only in what the bootloader and installers change in place (slot attributes, GUIDs); a
+        # different set or position of partitions there is not something this tool expected: stop before writing.
+        if lun != 0 and (removed or added or moved):
+            raise SourceError(f'LUN{lun} 的分区布局和原厂不同（去掉 {removed or "无"}，新增 {added or "无"}，'
+                              f'位置变化 {moved or "无"}）：只有 LUN0 允许改布局，什么都没写。请求助')
         gpt_writes.append({'lun': lun, 'main': main, 'back': back, 'nds': nds,
-                           'removed': sorted(set(dev) - set(gpts[lun])), 'added': sorted(set(gpts[lun]) - set(dev)),
-                           'moved': sorted(n for n in set(dev) & set(gpts[lun]) if dev[n] != gpts[lun][n])})
+                           'removed': removed, 'added': added, 'moved': moved})
     writes, skipped = programs(img)
     for lun, start, f, label in writes:
         part = gpts[lun].get(label)
