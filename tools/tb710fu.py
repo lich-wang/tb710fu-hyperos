@@ -5,7 +5,7 @@
   tb710fu.py check                     9008 (default): read-only check of the connected tablet
   tb710fu.py check --adb               same over adb (needs root: Magisk, allow Shell)
   tb710fu.py check FILE|DIR|ZIP|7Z...  offline: abl / vbmeta of an official package or of dumped images
-  tb710fu.py backup                    9008: full read-only backup (GPT + everything but userdata), resumable
+  tb710fu.py backup                    9008: full read-only backup (GPT + all but userdata and non-super partitions of 4 GiB or more), resumable
   tb710fu.py pull                      Lenovo stock parts for the build, from a full backup of the tablet
   tb710fu.py pull --package ZIP|7Z|DIR  ... or from an official Lenovo 9008 package
   tb710fu.py import OTA.zip            Xiaomi Pad 8 (yupei) parts from the official Xiaomi full OTA package

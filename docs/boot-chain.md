@@ -78,8 +78,8 @@ python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原�
 ```
 
 - **backup**：
-  - 读全部 LUN 的 GPT（主表和备份表），以及除 `userdata` 外的所有分区，存到 `work/backup/<芯片序列号>-<时间>/`；
-  - 超过 4 GiB 的非系统分区（例如装了 Linux 后的根分区）会跳过，并列出原因；
+  - 读全部 LUN 的 GPT（主表和备份表），以及除 `userdata` 和 4 GiB 及以上的非 super 分区外的所有分区，存到 `work/backup/<芯片序列号>-<时间>/`；
+  - 4 GiB 及以上的非 super 分区（例如装了 Linux 后的根分区）会跳过，并列出原因；
   - 每读完一步就保存进度，super 按 1 GiB 一段读；
   - 结束时写 `SHA256SUMS`。里面有唯一数据分区，要另外存一份。
 - **pull**：取出当前槽的组件，放到 `work/lenovo/…/`，并写一份 `lenovo.json`（sha256、build 指纹、AVB 签名和回滚索引）。

@@ -1,8 +1,8 @@
 """restore-stock: put a TB710FU back to Lenovo's stock ZUXOS 1.5.04.495 over 9008 (rescue, or starting over).
 
 The fallback when `restore` cannot be used (e.g. the partition table has changed since the backup). It still needs
-the tablet's own full backup (backup.py; it holds every unique-data partition, not userdata and not other
-partitions of 4 GiB or more).
+the tablet's own full backup (backup.py; it holds every unique-data partition, but not userdata and not the
+non-super partitions of 4 GiB or more; super itself is backed up).
 
 1. The Lenovo service flash package (stock_495.json: name, size, sha256, download address) is downloaded or taken
    from --package, and checked. It is password protected: the password is not in this repository; the user types
