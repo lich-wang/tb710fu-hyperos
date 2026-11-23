@@ -91,16 +91,18 @@ def sahara_info(text):
     """HWID / PK hash / chip serial printed by edl while connecting (only on the first connect after 9008).
 
     Newer edl (Sahara V3) also prints "MSM HWID : 0x3050e1 | model_id:… | oem_id:…" before the full "HW_ID :";
-    only the full 64-bit HWID counts.
+    only the full 64-bit HWID (exactly 16 hex digits) counts; anything shorter or longer is not taken.
 
     >>> sahara_info('- MSM HWID : 0x3050e1 | model_id:0x0000 | oem_id:0040\\n- HW_ID : 003050e100400000')['hwid']
     '003050e100400000'
     >>> sahara_info('HWID:              0x003050e100400000 (MSM_ID:0x003050e1,OEM_ID:0x0040,MODEL_ID:0x0000)')['hwid']
     '003050e100400000'
+    >>> 'hwid' in sahara_info('- HW_ID : 003050e1')
+    False
     """
     out = {}
     # newer edl: "HW_ID:", "OEM PKHASH:", "Chip Serial Number:"; older edl: "HWID:", "PK_HASH:", "Serial:" (0x...)
-    for key, rx in (('hwid', r'(?<!MSM )\bHW_?ID\s*:\s*(?:0x)?([0-9a-fA-F]+)'),
+    for key, rx in (('hwid', r'(?<!MSM )\bHW_?ID\s*:\s*(?:0x)?([0-9a-fA-F]{16})(?![0-9a-fA-F])'),
                     ('pk_hash', r'(?:OEM PKHASH|\bPK_HASH)\s*:\s*(?:0x)?([0-9a-fA-F]+)'),
                     ('chip_serial', r'(?:Chip Serial Number|\bSerial)\s*:\s*(?:0x)?([0-9a-fA-F]+)')):
         m = re.search(rx, text)
