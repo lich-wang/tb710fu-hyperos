@@ -15,6 +15,11 @@ reviews:
   commit_status: true        # 同时发布同名 commit status
   fail_commit_status: true   # 审查出错时让 check 失败，而不是以 neutral 状态放行
   assess_linked_issues: true # 评估本次改动是否解决了所关联的 Issue
+  # tools/avb、tools/mkbootimg 是原样放入的 AOSP 代码（来源提交见 tools/THIRD_PARTY.md），本仓库不改它们；
+  # 要修只能跟上游换版本，所以不审。
+  path_filters:
+    - "!tools/avb/**"
+    - "!tools/mkbootimg/**"
   auto_review:
     enabled: true
     drafts: false
