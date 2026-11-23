@@ -21,7 +21,8 @@ import getpass, hashlib, json, os, re, shutil, subprocess, tempfile, time, zlib
 import xml.etree.ElementTree as ET
 
 from . import layout
-from .flash import UNIQUE, confirm, file_sha256, overlaps, rollback_now, short_serial
+from . import avb, backup as backup_mod, check
+from .flash import UNIQUE, confirm, file_sha256, overlaps, short_serial
 from .sources import WORK, SourceError
 
 TABLE = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stock_495.json')))
@@ -245,8 +246,11 @@ def plan(src, img):
 def plan_slot_b(p):
     """The slot B counterpart of every slot A entry: same stock file, same offset inside the _b partition of the
     stock table. Needs the tablet's table to be the stock one already (p['gpt'] empty)."""
-    if p['gpt']:
-        raise SourceError('平板的分区表还不是原厂的：先不加 --slot-b 跑一次 restore-stock，再单独写 B 槽')
+    # the slot attributes in the table change once Android has booted (boot_a marked successful, ...), so only the
+    # partition layout has to be the stock one
+    moved = [g for g in p['gpt'] if g['removed'] or g['added'] or g['moved']]
+    if moved:
+        raise SourceError('平板的分区布局还不是原厂的：先不加 --slot-b 跑一次 restore-stock，再单独写 B 槽')
     where = {n: (lun, s, c) for lun, ents in p['gpts'].items() for n, (s, c) in ents.items()}
     out = []
     for lun, start, f, label in p['writes']:
@@ -317,7 +321,70 @@ def write_at(src, lun, start, path, work, what):
     print(f'    读回一致（sha256 {want[:16]}…）', flush=True)
 
 
-def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False):
+def full_backup(serial, src, backup_dir=None):
+    """The latest complete, verified full backup of this tablet (same chip serial), holding every unique-data
+    partition the tablet has. Its partition table may differ from today's (a rescue usually follows a change)."""
+    root = os.path.join(WORK, 'backup')
+    cands = [backup_dir] if backup_dir else sorted(
+        (os.path.join(root, d) for d in os.listdir(root)) if os.path.isdir(root) else [], reverse=True)
+    for d in cands:
+        try:
+            with open(os.path.join(d, 'backup.json')) as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            if backup_dir:
+                raise SourceError(f'{d} 不是本工具做的备份')
+            continue
+        if (st.get('device') or {}).get('chip_serial') != serial or not st.get('complete'):
+            if backup_dir:
+                raise SourceError(f'{d} 不是这台平板（{short_serial(serial)}）的完整备份')
+            continue
+        missing = [u for u in UNIQUE if u in src.parts and f'{u}.bin' not in st.get('items', {})]
+        if missing:
+            raise SourceError(f'{d} 里缺唯一数据分区 {missing}')
+        backup_mod.load(d)                  # every recorded file present with its recorded sha256
+        return d
+    raise SourceError('没有这台平板的完整备份：先跑 tb710fu.py backup（9008 下做，安卓坏了也能做），备份目录另存一份，'
+                      '再恢复原厂。原厂包里的 persist 等是空白模板，平板自己的这些数据只能靠备份找回')
+
+
+def check_rollback(src, slot):
+    """Images on the tablet must not carry higher rollback indexes than stock (stock would not boot). Each index is
+    compared as soon as it is read: a higher one refuses at once; one that cannot be read is only a warning."""
+    stock_rb = {int(k): v for k, v in TABLE['avb']['rollback'].items()}
+
+    def compare(loc, idx, what):
+        if idx > stock_rb.get(loc, 0):
+            raise SourceError(f'平板上 {what} 的回滚索引 {idx} 比原厂 {TABLE["version"]} 的 {stock_rb.get(loc, 0)} 高'
+                              f'（位置 {loc}）：刷原厂会启动不了，不刷')
+
+    try:
+        top = check.partition_vbmeta(src, f'vbmeta{slot}')
+        v = avb.parse_vbmeta(top) if top else None
+    except (SourceError, ValueError) as e:
+        print(f'⚠ 读不到平板上的 vbmeta{slot}（系统坏了？）：{e}。按原厂 {TABLE["version"]} 继续')
+        return
+    if v is None:
+        print(f'⚠ 平板上的 vbmeta{slot} 没有 AVB 签名（系统坏了？）。按原厂 {TABLE["version"]} 继续')
+        return
+    compare(v['rollback_location'], v['rollback'], f'vbmeta{slot}')
+    for c in v['chains']:
+        if c['partition'] not in ('boot', 'vbmeta_system'):
+            continue
+        name = c['partition'] + slot
+        try:
+            blob = check.partition_vbmeta(src, name)
+            idx = avb.parse_vbmeta(blob)['rollback'] if blob else None
+        except (SourceError, ValueError) as e:
+            print(f'⚠ 读不到平板上 {name} 的回滚索引：{e}。按原厂 {TABLE["version"]} 继续')
+            continue
+        if idx is None:
+            print(f'⚠ 平板上的 {name} 没有 AVB 签名。按原厂 {TABLE["version"]} 继续')
+            continue
+        compare(c['rollback_location'], idx, name)
+
+
+def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False, backup_dir=None):
     serial = (src.sahara or {}).get('chip_serial')
     if not serial:
         raise SourceError('这次 edl 没打印芯片序列号：拔线，长按电源 15–20 秒关机，重新进 9008 再试')
@@ -326,18 +393,9 @@ def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False):
     p = plan(src, img)
     if slot_b:
         return run_slot_b(src, serial, img, p, dry_run, assume_yes)
-    # images on the tablet must not carry higher rollback indexes than stock (stock would not boot)
-    stock_rb = {int(k): v for k, v in TABLE['avb']['rollback'].items()}
-    try:
-        rb = rollback_now(src, src.slot or '_a')
-        high = {k: (v, stock_rb.get(k)) for k, v in rb.items() if v > stock_rb.get(k, 0)}
-        if high:
-            raise SourceError(f'平板上镜像的回滚索引比原厂 {TABLE["version"]} 高 {high}（位置: (设备, 原厂)）：'
-                              '刷原厂会启动不了，不刷')
-    except SourceError as e:
-        if '回滚索引' in str(e):
-            raise
-        print(f'⚠ 读不到平板上的回滚索引（系统坏了？）：{e}。按原厂 {TABLE["version"]} 继续')
+    bdir = full_backup(serial, src, backup_dir)
+    print(f'这台平板的完整备份：{bdir}（已核对）')
+    check_rollback(src, src.slot or '_a')
     print(f'\n==== 恢复联想官方 {TABLE["version"]}（平板 {short_serial(serial)}）====')
     for g in p['gpt']:
         print(f'  LUN{g["lun"]} 分区表 ← 原厂（按 {g["nds"]} 个扇区算好；去掉 {g["removed"] or "无"}，'
