@@ -15,7 +15,7 @@
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
   tb710fu.py flash [--stage first|after-setup]   9008: write the package (asks first; reads every write back)
   tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
-  tb710fu.py restore-stock             9008: back to Lenovo's stock ZUXOS 1.5.04.495 when no backup is left (rescue)
+  tb710fu.py restore-stock             9008: back to Lenovo's stock ZUXOS 1.5.04.495 (also needs the tablet's full backup)
   tb710fu.py report                    text for the flash report issue (versions, ABL, package; read only)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
@@ -258,7 +258,7 @@ def main():
         w.add_argument('--loader', help='9008 firehose 加载器')
         w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
         w.add_argument('--no-reset', action='store_true', help='写完留在 9008')
-    r = sub.add_parser('restore-stock', help='9008 恢复成联想官方原厂 495（备份丢了时救砖；不写唯一数据分区，会清空数据）')
+    r = sub.add_parser('restore-stock', help='9008 恢复成联想官方原厂 495（要先有这台平板的完整备份；不写唯一数据分区，会清空数据）')
     r.add_argument('--package', help='已经下载好的 TB710_ZUXOS_1.5.04.495_Tool.7z（默认下载到 work/stock/）')
     r.add_argument('--loader', help='9008 firehose 加载器')
     r.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
