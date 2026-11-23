@@ -103,7 +103,7 @@ class EdlSource:
 
     def edl(self, *args, ok=None):
         cmd = [edl_bin(), *map(str, args), f'--loader={self.loader}']
-        if args[0] != 'reset':          # edl's reset command does not accept --memory
+        if args[0] not in ('reset', 'setbootablestoragedrive'):     # these edl commands do not accept --memory
             cmd.append('--memory=ufs')
         try:
             # edl writes edl_config.json into its working directory: keep it out of the repository

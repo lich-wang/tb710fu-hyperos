@@ -15,6 +15,7 @@
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
   tb710fu.py flash [--stage first|after-setup]   9008: write the package (asks first; reads every write back)
   tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
+  tb710fu.py restore-stock             9008: back to Lenovo's stock ZUXOS 1.5.04.495 when no backup is left (rescue)
   tb710fu.py report                    text for the flash report issue (versions, ABL, package; read only)
 
 The check answers whether the tablet's bootloader (ABL) trusts the public AOSP test key, and writes the
@@ -29,7 +30,7 @@ Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclie
 import argparse, json, os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tb import backup, bootchain, check, doctor, flash, framework, lenovo, package, report, sources, vendor, xiaomi  # noqa: E402
+from tb import backup, bootchain, check, doctor, flash, framework, lenovo, package, report, sources, stock, vendor, xiaomi  # noqa: E402
 
 
 def cmd_check(a):
@@ -191,6 +192,10 @@ def cmd_restore(a):
     return write_cmd(a, lambda src: flash.restore(src, a.backup, dry_run=a.dry_run))
 
 
+def cmd_restore_stock(a):
+    return write_cmd(a, lambda src: stock.run(src, a.package, dry_run=a.dry_run))
+
+
 def cmd_package(a):
     try:
         out, m = package.build(a.find, a.nofind, allow_debug=a.allow_debug)
@@ -253,6 +258,11 @@ def main():
         w.add_argument('--loader', help='9008 firehose 加载器')
         w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
         w.add_argument('--no-reset', action='store_true', help='写完留在 9008')
+    r = sub.add_parser('restore-stock', help='9008 恢复成联想官方原厂 495（备份丢了时救砖；不写唯一数据分区，会清空数据）')
+    r.add_argument('--package', help='已经下载好的 TB710_ZUXOS_1.5.04.495_Tool.7z（默认下载到 work/stock/）')
+    r.add_argument('--loader', help='9008 firehose 加载器')
+    r.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
+    r.add_argument('--no-reset', action='store_true', help='写完留在 9008')
     d = sub.add_parser('doctor', help='刷机前的环境检查：工具、下载、磁盘、GitHub CLI、USB；--usb 练习手动进 9008 并测试通信')
     d.add_argument('--usb', action='store_true', help='引导手动进 9008，只读测试 edl 通信后复位')
     d.add_argument('--verify-downloads', action='store_true', help='校验小米底包的 md5（10 GB，要一会儿）')
@@ -261,7 +271,7 @@ def main():
     a = ap.parse_args()
     return {'check': cmd_check, 'backup': cmd_backup, 'pull': cmd_pull, 'import': cmd_import,
             'vendor': cmd_vendor, 'framework': cmd_framework, 'bootchain': cmd_bootchain,
-            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore,
+            'package': cmd_package, 'flash': cmd_flash, 'restore': cmd_restore, 'restore-stock': cmd_restore_stock,
             'report': lambda a: 0 if report.run() else 1,
             'doctor': lambda a: 0 if doctor.run(a.usb, a.verify_downloads, a.loader) else 1}[a.cmd](a)
 

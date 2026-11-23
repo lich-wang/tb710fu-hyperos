@@ -48,7 +48,12 @@ python3 tools/tb710fu.py check 固件文件夹/.zip/.7z/镜像  # 离线：官�
 | CN ZUI 17.0.04.354（ST_251111） | `c36229b8…` | testkey_rsa4096 | testkey_rsa4096 | 1759622400 |
 | CN ZUI 17.5.04.414（ST_260320） | `3c51d47f…` | testkey_rsa4096 | testkey_rsa4096 | 1772668800 |
 | ROW ZUI 17.5.04.059（ST_260327） | `09f3c057…` | testkey_rsa4096 | testkey_rsa4096 | 1772668800 |
-| ZUXOS 1.5.04.495（免解锁补充包） | `6cfa16e6…` | testkey_rsa4096 | — | 1783209600 |
+| ZUXOS 1.5.04.495（免解锁补充包） | `6cfa16e6…`（= 279 的 abl，按分区大小补了 0） | testkey_rsa4096 | testkey_rsa4096 | 1783209600 |
+| **ZUXOS 1.5.04.495（联想官方原厂）** | `8787d92e…` | **两把**：联想自己的 RSA4096（sha1 `8fcb864f…`）+ testkey_rsa4096 | **联想自己的密钥**（vbmeta/boot/recovery/vbmeta_system 都是） | 1783209600 |
+
+- **原厂 495 换成了联想自己的密钥签名**，但 abl 里仍然保留着测试密钥。它的回滚索引是 vbmeta 0、recovery 1、vbmeta_system 1783209600、boot 1736035200。
+- **"495 免解锁补充包"不是原厂 495**：只有 vendor_boot、dtbo、pvmfw 和原厂 495 一样；abl 和 CN 17.0.04.279 的逐字节相同，vbmeta、vbmeta_system、recovery、boot、init_boot 都是用测试密钥重签的。
+- 原厂 495 包来自联想服务资料库，有解压密码（本仓库不提供），见下面的 restore-stock。
 
 下载地址（lolinet 镜像，2026-11-11 下载；`.7z` 里是 QFIL 9008 线刷包，`image/` 下是各分区镜像和 rawprogram）：
 
@@ -167,6 +172,42 @@ python3 tools/tb710fu.py restore                      # 出问题时：用这台
 - **读回**：每个文件写之前再按 manifest / backup.json 的记录核对一次 sha256；每写一个分区立刻读回比对，不一致就停在那里，**不复位**，平板留在 9008。写完后重新读 GPT，分区表和各分区的属性（flags，决定启动哪个槽）都要和写之前一样。没有跳过读回的选项。
 - **restore** 只写回启动链（含 `recovery`）和 super，不碰 userdata；如果第一阶段已经清过数据，原系统开机时会自己重新初始化。备份里镜像的回滚索引低于平板上现在的（例如备份之后升级过系统）时会拒绝，因为写回去多半启动不了。
 - **测试情况**：用模拟的 edl（按这台平板真实的 GPT 和备份内容建的 LUN 镜像）测过：确认、预检拒绝的各种情况、写坏后读回发现、第一、二阶段、写回备份（含 19 GB 的 super）。**还没在真机上写过。**
+
+### 恢复联想官方原厂（restore-stock，#37）
+
+```bash
+python3 tools/tb710fu.py restore-stock --dry-run                       # 下载/核对/解压、连上平板做完所有检查、打印计划，不写
+python3 tools/tb710fu.py restore-stock                                 # 恢复成联想官方原厂 ZUXOS 1.5.04.495
+python3 tools/tb710fu.py restore-stock --package TB710_ZUXOS_1.5.04.495_Tool.7z   # 用已经下载好的包
+```
+
+**正常情况下用 `restore`**（用这台平板自己的备份写回）。`restore-stock` 是兜底：**备份丢了**、或者想从原厂系统重新开始时用。它不需要事先有备份。
+
+- **原厂包**：联想服务资料库的 `TB710_ZUXOS_1.5.04.495_Tool.7z`（10156610508 字节）。地址、大小、sha256 写在 `tools/tb/stock_495.json`，工具会断点续传下载并核对整包。
+- **解压密码**：包有解压密码，**本仓库不提供**。运行时工具会让你输入，也可以设置环境变量 `TB_STOCK_PASSWORD`。密码只传给 7-Zip，不打印、不保存。解压后 100 个文件逐个按 `stock_495.json` 核对 sha256。
+- **写什么**：
+  - 照联想自己刷机脚本用的清单（`rawprogram_unsparse0-half.xml` + `rawprogram1–5.xml`，本来就不写 persist），写原厂的底层固件、A 槽启动链、super、metadata、userdata；
+  - 再去掉唯一数据分区：联想的清单还会写 `secdata`（和设备上的相同）和 `ddr`（清掉内存训练数据），这里都不写；
+  - 最后像联想脚本一样把启动盘设为 LUN1（xbl_a 所在）。
+- **分区表**：
+  - 每个 LUN 的 GPT 按包里的 `patch*.xml`、用这个 LUN 的实际大小离线算好（userdata 一直到盘尾，主、备两份，CRC 核对）；
+  - 和设备上一样的不写。不一样的，只有在**所有唯一数据分区的位置和大小都与设备上完全相同**时才写，否则什么都不写、提示求助；
+  - 写完分区表后重新读出核对。
+  - 原厂分区表里两个槽都没有标"当前"，和联想自己刷机一样，开机时由 abl 选 A 槽。
+- **写之前**：
+  - 芯片序列号（Sahara）；
+  - 平板上镜像的回滚索引不能比原厂 495 高（高了原厂启动不了，拒绝）；读不到时（系统坏了）提示后继续；
+  - 打印全部写入项（分区 ← 文件、大小、完整 sha256），先输入 `stock` 确认，再输入 `wipe` 同意清数据；
+  - **第一次写入前，自动只读保存**全部 LUN 的主、备份 GPT 和所有唯一数据分区到 `work/stock-safety/<芯片序列号>-<时间>/`（附 SHA256SUMS）。
+- **读回**：每次写入都读回比对，不一致立刻停下，平板留在 9008。
+- **后果**：安卓数据清空；原厂以外的分区（例如 ArmadaOS 的 ARMADA_BOOT/ROOT/BACKUP）删掉，userdata 恢复原厂大小；底层固件和 A 槽启动链换回原厂。B 槽不写。
+- **适用范围**：TB710FU 国行原厂 495（目前联想服务库里最新的版本）。设备如果已经装了更新的系统（回滚索引更高），会被拒绝。海外版（ROW）机器刷国行固件没有验证过。
+- **测试情况**：
+  - 模拟的 edl（按这台平板真实的 GPT 和全部备份分区建的 6 个 LUN）：完整恢复（唯一数据分区逐字节不变、LUN0 恢复原厂、ARMADA 分区删除、userdata 到盘尾、abl/boot/xbl/vbmeta_system 为原厂、启动盘 LUN1）、重复执行、唯一数据分区位置不同时拒绝、回滚索引更高时拒绝、密码错误。
+  - **真机（2026-11-23，参考平板）**：从“HyperOS 4（旧方案）+ ArmadaOS Freedom 双系统”恢复。六个 LUN 的分区表、A 槽 73 项全部写入并读回一致，重新读出的分区表和算好的一致；
+    复位后直接进联想原厂开机向导：`ZUXOS_1.5.04.495_ST_260728`，`verifiedbootstate=green`、BL 仍锁、当前槽 A；ARMADA 分区没有了，`/data` 215 GB（userdata 到盘尾）。
+    同时发现并修好：`edl setbootablestoragedrive` 不接受 `--memory`（之前写完所有分区后卡在设启动盘这一步，平板留在 9008，补发后正常）。
+- **已经解压过**：`work/stock/1.5.04.495/image` 里的 100 个文件全部核对通过时不再解压，也不要密码（可以把以前解压好的 `image` 文件夹放到这里）。
 
 ## 9008（EDL）
 
