@@ -57,7 +57,7 @@ def collect():
         out += [
             f'设备档案：{prof.get("created")}（check {"通过" if prof.get("ok") else "没通过"}，读取方式 {dev.get("source")}）',
             f'  芯片序列号 {short_serial(dev.get("chip_serial"))}  HWID {dev.get("hwid", "?")}  当前槽 {prof.get("slot")}',
-            f'  ABL：{ {"trusted": "信任 AOSP 测试密钥", "not_trusted": "不信任测试密钥", "unknown": "判断不了"}.get(prof.get("testkey"), prof.get("testkey"))}'
+            f'  ABL：{ {"trusted": "信任 AOSP 测试密钥", "needs_abl": "联想原厂 495（只认联想密钥，刷机时换 CN 279 abl）", "not_trusted": "不信任测试密钥", "unknown": "判断不了"}.get(prof.get("testkey"), prof.get("testkey"))}'
             f'；内置公钥 {keys}；签名证书 {", ".join(abl.get("signer", [])) or "?"}',
             f'  回滚索引 {dict(sorted((prof.get("rollback") or {}).items()))}',
         ]

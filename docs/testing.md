@@ -30,8 +30,8 @@
 | 磁盘 | 建议至少 150 GB 空闲：完整备份约 25 GB、联想包 7–8 GB、小米 OTA 约 10 GB、导入后 12 GB、构建中间产物和刷机包约 40 GB、写入时读回 super 约 11 GB |
 | Python | 3.8 以上，只用标准库 |
 | 工具 | `e2fsprogs`、`erofs-utils`（`mkfs.erofs` 需支持 `--tar`）、`lz4`、`7zz` 或 `7z`（读 .7z 包）、[bkerler/edl](https://github.com/bkerler/edl)、[GitHub CLI](https://cli.github.com/)（`gh`，已 `gh auth login`，用来提交报告） |
-| AOSP 工具 | `avbtool.py` + `testkey_rsa4096.pem`、`testkey_rsa2048.pem`（AOSP external/avb）放到 `tools/avb/`；`mkbootimg.py`、`unpack_bootimg.py`（AOSP system/tools/mkbootimg，连同 `gki/` 目录）放到 `tools/mkbootimg/` |
-| 9008 加载器 | 联想官方 9008 包里的 `xbl_s_devprg_ns.melf` / `prog_firehose_ddr*.melf`，放到 `work/firehose/`（或 `--loader` 指定） |
+| AOSP 工具 | 仓库自带，不用另外下载：`tools/avb/`（`avbtool.py` 和两把测试密钥）、`tools/mkbootimg/`（`mkbootimg.py`、`unpack_bootimg.py`），见 [tools/THIRD_PARTY.md](../tools/THIRD_PARTY.md) |
+| 9008 加载器 | 联想官方 9008 包里的 `xbl_s_devprg_ns.melf` / `prog_firehose_ddr*.melf`，放到 `work/firehose/`（或 `--loader` 指定；不进仓库） |
 
 ```bash
 # macOS
@@ -71,6 +71,7 @@ python3 tools/tb710fu.py doctor --usb   # 环境和 9008 都通了再开始（�
 python3 tools/tb710fu.py check          # 只读：ABL 是否信任测试密钥，生成设备档案 work/device/latest.json
 python3 tools/tb710fu.py backup         # 只读：完整备份（二十多 GB，断了重跑会接着读）——备份目录另存一份！
 python3 tools/tb710fu.py pull           # 从备份取联想原厂组件（平板已不是原厂系统时：pull --package 联想官方包.7z）
+python3 tools/tb710fu.py abl 联想CN279包.7z   # 只有 check 说"联想原厂 495"时才要：取替换用的 CN 17.0.04.279 abl
 python3 tools/tb710fu.py import work/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip
 python3 tools/tb710fu.py vendor
 python3 tools/tb710fu.py framework
@@ -134,6 +135,8 @@ python3 tools/tb710fu.py report     # 原来的版本线索、ABL 状态和公�
   python3 tools/tb710fu.py package
   python3 tools/tb710fu.py flash --dry-run
   ```
+- **联想官方原厂 495**：它的 abl 只认联想自己的密钥，刷机时会把当前槽 abl 换成 CN 17.0.04.279 的（见 [boot-chain.md](boot-chain.md) 的"联想官方原厂 495 的 abl"）。
+  这个判断来自静态分析和 Y700 四代的实证，TB710FU 原厂 495 上的第一次刷入正是要验证它。报告里请写明 `check` 的结论。
 - **海外版（ROW）**：ROW 官方包的 rawprogram 是加密的，`pull --package` 用不了；平板还是原厂系统时可以 `pull` 自己的备份。
 - [porting.md](porting.md) 里标了"待真机"的项，例如设备兼容性矩阵缺的两个框架服务、联想自己的 lwky 服务。
 - 只验证过 yupei `OS4.0.5.0.XPZCNXM`；更新的小米版本 `import` 会提示未验证，需要 `--force`，结果请在报告里注明。

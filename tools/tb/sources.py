@@ -35,17 +35,17 @@ def edl_bin():
     if e:
         # a path (not a bare command name) is made absolute: edl runs with the log folder as working directory
         return os.path.abspath(e) if os.sep in e else e
-    for c in (os.path.join(TOOLS, 'venv/bin/edl'), os.path.join(os.path.dirname(REPO), 'tools/venv/bin/edl')):
-        if os.access(c, os.X_OK):
-            return c
+    c = os.path.join(TOOLS, 'venv/bin/edl')
+    if os.access(c, os.X_OK):
+        return c
     return shutil.which('edl') or 'edl'
 
 
 def find_loader(given=None):
-    """Firehose programmer: --loader, $TB_LOADER, work/firehose/*, or ../firehose/* next to the repository."""
+    """Firehose programmer: --loader, $TB_LOADER or work/firehose/*."""
     cands = [given, os.environ.get('TB_LOADER')]
-    for d in (os.path.join(WORK, 'firehose'), os.path.join(os.path.dirname(REPO), 'firehose')):
-        cands += sorted(glob.glob(os.path.join(d, '*.melf')) + glob.glob(os.path.join(d, '*.elf')))
+    d = os.path.join(WORK, 'firehose')
+    cands += sorted(glob.glob(os.path.join(d, '*.melf')) + glob.glob(os.path.join(d, '*.elf')))
     for c in cands:
         if c and os.path.isfile(c):
             return os.path.abspath(c)
