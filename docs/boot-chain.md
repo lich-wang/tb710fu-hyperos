@@ -80,6 +80,7 @@ python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原�
 - **backup**：
   - 读全部 LUN 的 GPT（主表和备份表），以及除 `userdata` 和 4 GiB 及以上的非 super 分区外的所有分区，存到 `work/backup/<芯片序列号>-<时间>/`；
   - 4 GiB 及以上的非 super 分区（例如装了 Linux 后的根分区）会跳过，并列出原因；
+  - 分区名不能当文件名（以 `.` 开头，或含 `/`、`\`、空字符）或带逗号（edl 会把它拆成两个名字）的分区也会跳过并列出（TB710FU 的原厂和装过 ArmadaOS 的分区表里都没有这种名字）；
   - 每读完一步就保存进度，super 按 1 GiB 一段读；
   - 结束时写 `SHA256SUMS`。里面有唯一数据分区，要另外存一份。
 - **pull**：取出当前槽的组件，放到 `work/lenovo/…/`，并写一份 `lenovo.json`（sha256、build 指纹、AVB 签名和回滚索引）。
@@ -89,7 +90,7 @@ python3 tools/tb710fu.py pull --package 包.zip           # 平板已不是原�
   - 按 `rawprogram*.xml` 把 super 的各段（sparse 或 raw）拼回去，起点用包里的 `gpt_main0.bin` 定位；
   - 国行包（如 CN 17.5.04.414）的 rawprogram 是明文 xml，可以用；海外 ROW 包（如 17.5.04.059）的 xml 是加密的 `.x` 文件，
     只有联想的刷机工具能解开，不知道 super 各段的位置，所以不能用；
-  - 包里的底层固件会逐个和设备档案比对，版本不一致时提示兼容风险。本项目不写底层固件。
+  - 包里的底层固件会逐个和设备档案比对，版本不一致时提示兼容风险。`pull` 和刷机（`flash`）不写底层固件；只有 `restore-stock` 会把底层固件换回联想原厂（见下文）。
 
 ### 新流程的启动链（bootchain）
 
