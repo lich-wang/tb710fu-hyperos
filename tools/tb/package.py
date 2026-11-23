@@ -14,7 +14,7 @@ must match the image it came from.
 """
 import glob, hashlib, json, os, re, shutil, sys, tempfile, time
 
-from . import abl as abl_mod, bootchain, layout
+from . import abl as abl_mod, avb, bootchain, layout
 from .lenovo import fingerprints
 from .backup import file_sha256
 from .sources import TOOLS, WORK, SourceError
@@ -86,6 +86,13 @@ def build(find_dir=None, nofind_dir=None, allow_debug=False):
     if norm(prof['rollback']) != norm(bc['find']['rollback']):
         raise SourceError(f'设备现在的回滚索引 {norm(prof["rollback"])} 和启动链里的 {norm(bc["find"]["rollback"])} 不同'
                           '：启动链已过期，重跑 bootchain')
+    # vbmeta chains recovery to the key the device's recovery had when bootchain ran: it must still be that key
+    rec_now = ((prof['vbmeta'].get('recovery') or {}).get('key') or {}).get('sha1')
+    with open(os.path.join(find_dir, 'vbmeta.img'), 'rb') as f:
+        chained = {c['partition']: (c['key'] or {}).get('sha1') for c in avb.parse_vbmeta(avb.find_vbmeta(f.read()))['chains']}
+    if not rec_now or chained.get('recovery') != rec_now:
+        raise SourceError(f'启动链 vbmeta 里 recovery 链的公钥（sha1 {chained.get("recovery")}）和设备现在的 recovery'
+                          f'（sha1 {rec_now}）不同：设备的 recovery 换过，重跑 bootchain')
     if not (prof.get('super') or {}).get('bytes'):
         raise SourceError('设备档案里没有 super 大小：重跑 tb710fu.py check')
     slot = prof['slot']

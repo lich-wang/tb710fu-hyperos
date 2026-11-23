@@ -327,9 +327,11 @@ def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, b
     if chains != want or dev != want:
         raise SourceError(f'链式布局不对：联想包 {chains}，设备 {dev}，预期 {want}')
     if prof['testkey'] == 'trusted':
-        if devkeys != {n: f'testkey_{k}' for n, (_, k) in CHAINS.items()}:
+        # recovery is never written: after a first flash over stock 495 it is still Lenovo's (checked in step 2)
+        want_keys = {n: f'testkey_{k}' for n, (_, k) in CHAINS.items() if n != 'recovery'}
+        if {n: devkeys.get(n) for n in want_keys} != want_keys:
             raise SourceError(f'设备链上的公钥不是预期的测试密钥：{devkeys}')
-        res['checks'].append(f'链式布局和公钥 {want}（联想包、设备一致）')
+        res['checks'].append(f'链式布局 {want}、boot 和 vbmeta_system 链的测试密钥（联想包、设备一致）')
     else:
         # stock 495: every chain is Lenovo's key; boot and vbmeta_system are rebuilt, recovery is chained to its key
         if any(devkeys.values()):
@@ -350,13 +352,12 @@ def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, b
     rec_key = os.path.join(work, 'pk_recovery.bin')
     with open(rec_key, 'wb') as f:
         f.write(avb.key_blob(rec_vb))
-    if (rec_v['key'] or {}).get('name') == 'testkey_rsa4096':
-        res['checks'].append(f'recovery 保留设备上的（testkey_rsa4096，回滚索引 {rec["rollback"]}）')
-    elif prof['testkey'] == 'needs_abl' and rec_v['alg'] == 'SHA256_RSA4096':
-        res['checks'].append(f'recovery 保留设备上的（联想自己的密钥 sha1 {rec_v["key"]["sha1"]}，回滚索引 '
-                             f'{rec["rollback"]}）：vbmeta 的 recovery 链用这把公钥')
-    else:
-        raise SourceError(f'设备 recovery 的签名（{avb.key_str(rec_v["key"])}，{rec_v["alg"]}）和新 vbmeta 的链对不上')
+    # the key the recovery is really signed with decides the chain, whatever the ABL is (recovery is never written)
+    if not rec_v['key'] or rec_v['alg'] == 'NONE':
+        raise SourceError('设备 recovery 没有签名公钥，新 vbmeta 的 recovery 链对不上')
+    res['recovery_key_sha1'] = rec_v['key']['sha1']
+    res['checks'].append(f'recovery 保留设备上的（{avb.key_str(rec_v["key"])}，{rec_v["alg"]}，回滚索引 '
+                         f'{rec["rollback"]}）：vbmeta 的 recovery 链用这把公钥')
 
     # 3. boot images
     for n in ('init_boot', 'dtbo'):
