@@ -15,17 +15,18 @@ recovery is chained to the key the device's recovery is signed with: the test ke
 ZUXOS 1.5.04.495 (whose ABL the package then replaces, see abl.py).
 Rollback indexes are exactly the device's current values: never raised, so stock firmware still boots later.
 
-Needs AOSP avbtool + test keys in tools/avb/ and mkbootimg/unpack_bootimg in tools/mkbootimg/, and lz4.
+Uses the AOSP avbtool + test keys in tools/avb/ and mkbootimg/unpack_bootimg in tools/mkbootimg/ (both in the
+repository, see tools/THIRD_PARTY.md), and lz4.
 """
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
 from . import avb
 from .backup import file_sha256
-from .sources import REPO, TOOLS, WORK, SourceError
+from .sources import TOOLS, WORK, SourceError
 from .vendor import fstab_add_erofs
 
 AVB_DIR = os.path.join(TOOLS, 'avb')
-MKB_DIRS = (os.path.join(TOOLS, 'mkbootimg'), os.path.join(os.path.dirname(REPO), 'tools', 'mkbootimg'))
+MKB_DIR = os.path.join(TOOLS, 'mkbootimg')
 K4096, K2048 = os.path.join(AVB_DIR, 'testkey_rsa4096.pem'), os.path.join(AVB_DIR, 'testkey_rsa2048.pem')
 VBMETA_HASH = ('init_boot', 'dtbo', 'vendor_boot')          # hash descriptors in vbmeta
 VBMETA_TREE = ('odm', 'system_dlkm', 'vendor', 'vendor_dlkm')  # hashtree descriptors in vbmeta
@@ -42,17 +43,14 @@ def need(path, what):
 
 def avbtool(*args):
     p = subprocess.run([sys.executable, need(os.path.join(AVB_DIR, 'avbtool.py'),
-                        'AOSP external/avb 的 avbtool.py'), *map(str, args)], capture_output=True, text=True)
+                        '仓库自带的 AOSP avbtool.py（重新检出仓库）'), *map(str, args)], capture_output=True, text=True)
     if p.returncode:
         raise SourceError(f'avbtool {args[0]} 失败：{(p.stdout + p.stderr).strip()[-600:]}')
     return p.stdout
 
 
 def mkb(script):
-    for d in MKB_DIRS:
-        if os.path.exists(os.path.join(d, script)):
-            return [sys.executable, os.path.join(d, script)]
-    raise SourceError(f'缺 tools/mkbootimg/{script}（AOSP system/tools/mkbootimg）')
+    return [sys.executable, need(os.path.join(MKB_DIR, script), '仓库自带的 AOSP mkbootimg（重新检出仓库）')]
 
 
 def run(cmd, **kw):

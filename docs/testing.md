@@ -30,8 +30,8 @@
 | 磁盘 | 建议至少 150 GB 空闲：完整备份约 25 GB、联想包 7–8 GB、小米 OTA 约 10 GB、导入后 12 GB、构建中间产物和刷机包约 40 GB、写入时读回 super 约 11 GB |
 | Python | 3.8 以上，只用标准库 |
 | 工具 | `e2fsprogs`、`erofs-utils`（`mkfs.erofs` 需支持 `--tar`）、`lz4`、`7zz` 或 `7z`（读 .7z 包）、[bkerler/edl](https://github.com/bkerler/edl)、[GitHub CLI](https://cli.github.com/)（`gh`，已 `gh auth login`，用来提交报告） |
-| AOSP 工具 | `avbtool.py` + `testkey_rsa4096.pem`、`testkey_rsa2048.pem`（AOSP external/avb）放到 `tools/avb/`；`mkbootimg.py`、`unpack_bootimg.py`（AOSP system/tools/mkbootimg，连同 `gki/` 目录）放到 `tools/mkbootimg/` |
-| 9008 加载器 | 联想官方 9008 包里的 `xbl_s_devprg_ns.melf` / `prog_firehose_ddr*.melf`，放到 `work/firehose/`（或 `--loader` 指定） |
+| AOSP 工具 | 仓库自带，不用另外下载：`tools/avb/`（`avbtool.py` 和两把测试密钥）、`tools/mkbootimg/`（`mkbootimg.py`、`unpack_bootimg.py`），见 [tools/THIRD_PARTY.md](../tools/THIRD_PARTY.md) |
+| 9008 加载器 | 联想官方 9008 包里的 `xbl_s_devprg_ns.melf` / `prog_firehose_ddr*.melf`，放到 `work/firehose/`（或 `--loader` 指定；不进仓库） |
 
 ```bash
 # macOS

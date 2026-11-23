@@ -20,5 +20,6 @@ credentials*
 .DS_Store
 __pycache__/
 *.pyc
-/tools/avb
+!/tools/avb/testkey_rsa4096.pem
+!/tools/avb/testkey_rsa2048.pem
 edl_config.json

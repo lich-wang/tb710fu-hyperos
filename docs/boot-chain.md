@@ -18,7 +18,7 @@
 3. 只改 boot 时，可以沿用原 boot 的 salt、回滚索引和属性，只替换内容并重签 footer，这样**不需要改 vbmeta**。
 
 工具：AOSP `avbtool`（`info_image` / `add_hash_footer` / `verify_image --follow_chain_partitions`）、
-AOSP `mkbootimg` / `unpack_bootimg`。仓库不附带它们，放到 `tools/avb/`、`tools/mkbootimg/` 即可。
+AOSP `mkbootimg` / `unpack_bootimg`。仓库自带原样副本（`tools/avb/`、`tools/mkbootimg/`，来源提交和许可证见 [tools/THIRD_PARTY.md](../tools/THIRD_PARTY.md)）。
 
 ### 检查一台设备 / 一个固件包是否信任测试密钥
 
