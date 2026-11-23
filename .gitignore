@@ -23,3 +23,4 @@ __pycache__/
 !/tools/avb/testkey_rsa4096.pem
 !/tools/avb/testkey_rsa2048.pem
 edl_config.json
+/tools/venv/
