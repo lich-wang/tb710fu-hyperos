@@ -234,6 +234,7 @@ python3 tools/tb710fu.py restore-stock --package TB710_ZUXOS_1.5.04.495_Tool.7z 
   - **真机（2026-11-23，参考平板）**：从“HyperOS 4（旧方案）+ ArmadaOS Freedom 双系统”恢复。六个 LUN 的分区表、A 槽 73 项全部写入并读回一致，重新读出的分区表和算好的一致；
     复位后直接进联想原厂开机向导：`ZUXOS_1.5.04.495_ST_260728`，`verifiedbootstate=green`、BL 仍锁、当前槽 A；ARMADA 分区没有了，`/data` 215 GB（userdata 到盘尾）。
     同时发现并修好：`edl setbootablestoragedrive` 不接受 `--memory`（之前写完所有分区后卡在设启动盘这一步，平板留在 9008，补发后正常）。
+    之后又两次从“原厂 495 + Freedom 双系统”恢复（A 槽 + 分区表 68 项、`--slot-b` 33 项，全部读回一致），每次开机都是原厂 495、`green`、槽 A。
 - **B 槽**：联想的清单只写 A 槽。`restore-stock --slot-b` 把 A 槽清单里每一项的同一个原厂文件写到对应的 `_b` 分区（底层固件 + 启动链，32 项），
   要求分区表已经是原厂的（先跑一次不带它的 restore-stock）；不写分区表、super、metadata、userdata，不清数据，槽位属性不变（仍从 A 槽启动）。确认词 `stock`。
 - **已经解压过**：`work/stock/1.5.04.495/image` 里的 100 个文件全部核对通过时不再解压，也不要密码（可以把以前解压好的 `image` 文件夹放到这里）。
