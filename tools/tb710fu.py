@@ -193,7 +193,7 @@ def cmd_restore(a):
 
 
 def cmd_restore_stock(a):
-    return write_cmd(a, lambda src: stock.run(src, a.package, dry_run=a.dry_run))
+    return write_cmd(a, lambda src: stock.run(src, a.package, dry_run=a.dry_run, slot_b=a.slot_b))
 
 
 def cmd_package(a):
@@ -262,6 +262,8 @@ def main():
     r.add_argument('--package', help='已经下载好的 TB710_ZUXOS_1.5.04.495_Tool.7z（默认下载到 work/stock/）')
     r.add_argument('--loader', help='9008 firehose 加载器')
     r.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')
+    r.add_argument('--slot-b', action='store_true',
+                   help='只把 B 槽（底层固件 + 启动链）也写成原厂；分区表要已是原厂的，不清数据')
     r.add_argument('--no-reset', action='store_true', help='写完留在 9008')
     d = sub.add_parser('doctor', help='刷机前的环境检查：工具、下载、磁盘、GitHub CLI、USB；--usb 练习手动进 9008 并测试通信')
     d.add_argument('--usb', action='store_true', help='引导手动进 9008，只读测试 edl 通信后复位')

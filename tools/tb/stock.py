@@ -242,6 +242,29 @@ def plan(src, img):
     return {'gpt': gpt_writes, 'writes': writes, 'skipped': skipped, 'gpts': gpts}
 
 
+def plan_slot_b(p):
+    """The slot B counterpart of every slot A entry: same stock file, same offset inside the _b partition of the
+    stock table. Needs the tablet's table to be the stock one already (p['gpt'] empty)."""
+    if p['gpt']:
+        raise SourceError('平板的分区表还不是原厂的：先不加 --slot-b 跑一次 restore-stock，再单独写 B 槽')
+    where = {n: (lun, s, c) for lun, ents in p['gpts'].items() for n, (s, c) in ents.items()}
+    out = []
+    for lun, start, f, label in p['writes']:
+        if not label.endswith('_a'):
+            continue
+        b = label[:-2] + '_b'
+        if b not in where:
+            raise SourceError(f'原厂分区表里有 {label} 却没有 {b}')
+        la, sa, ca = lun, *p['gpts'][lun][label]
+        lb, sb, cb = where[b]
+        if cb != ca:
+            raise SourceError(f'{label} 和 {b} 大小不同（{ca} / {cb} 个扇区）')
+        out.append((lb, sb + (start - sa), f, b))
+    if not out:
+        raise SourceError('清单里没有 A 槽条目')
+    return out
+
+
 def src_read(src, lun, start, count):
     with tempfile.TemporaryDirectory(dir=_mk(os.path.join(WORK, 'stock'))) as t:
         f = os.path.join(t, 'r.bin')
@@ -294,13 +317,15 @@ def write_at(src, lun, start, path, work, what):
     print(f'    读回一致（sha256 {want[:16]}…）', flush=True)
 
 
-def run(src, package=None, dry_run=False, assume_yes=False):
+def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False):
     serial = (src.sahara or {}).get('chip_serial')
     if not serial:
         raise SourceError('这次 edl 没打印芯片序列号：拔线，长按电源 15–20 秒关机，重新进 9008 再试')
     archive = fetch(package)
     img = extract(archive)
     p = plan(src, img)
+    if slot_b:
+        return run_slot_b(src, serial, img, p, dry_run, assume_yes)
     # images on the tablet must not carry higher rollback indexes than stock (stock would not boot)
     stock_rb = {int(k): v for k, v in TABLE['avb']['rollback'].items()}
     try:
@@ -352,7 +377,40 @@ def run(src, package=None, dry_run=False, assume_yes=False):
         for lun, start, f, label in p['writes']:
             write_at(src, lun, start, os.path.join(img, f), t, f'{label}（{f}）')
     src.edl('setbootablestoragedrive', BOOT_LUN)
+    write_record(serial, 'a')
     print(f'\n✅ 已恢复联想官方 {TABLE["version"]}，全部读回一致。安全副本：{safety}')
     print('第一次开机会慢一些（重新建数据分区）。原厂分区表里两个槽都没有标成"当前"，和联想自己刷机一样，'
           '开机时由 abl 自己选 A 槽。开机后是原厂系统，需要重新设置')
+    return True
+
+
+def write_record(serial, what):
+    os.makedirs(_mk(os.path.join(WORK, 'stock')), exist_ok=True)
+    with open(os.path.join(WORK, 'stock', f'{serial}.json'), 'a') as f:
+        f.write(json.dumps({'written': what, 'version': TABLE['version'], 'time': time.strftime('%Y-%m-%dT%H:%M:%S%z')}) + '\n')
+
+
+def run_slot_b(src, serial, img, p, dry_run, assume_yes):
+    """--slot-b: the stock images of slot A also into slot B (firmware and boot chain). No GPT, no super, metadata or
+    userdata, so no data is lost; the slot attributes stay as they are (A stays the one that boots)."""
+    writes = plan_slot_b(p)
+    for lun, start, f, label in writes:
+        q = src.parts.get(label)
+        if not q or q['lun'] != lun or not (q['start'] <= start < q['start'] + q['sectors']):
+            raise SourceError(f'{label} 在平板现在的分区表里的位置和原厂的不一样：什么都没写')
+    print(f'\n==== B 槽恢复成联想官方 {TABLE["version"]}（平板 {short_serial(serial)}）====')
+    for lun, start, f, label in writes:
+        v = TABLE['files'][f]
+        print(f'  {label:18} ← {f}（{v["bytes"]} 字节，sha256 {v["sha256"]}）')
+    print('不写：分区表、A 槽、super、metadata、userdata、唯一数据分区；槽位属性不变（仍从 A 槽启动），安卓数据保留')
+    if dry_run:
+        print('\n--dry-run：检查都通过，什么都没写')
+        return False
+    confirm('\n确认把 B 槽写成联想官方原厂？', 'stock', assume_yes)
+    safety = safety_copy(src, serial)
+    with tempfile.TemporaryDirectory(dir=WORK) as t:
+        for lun, start, f, label in writes:
+            write_at(src, lun, start, os.path.join(img, f), t, f'{label}（{f}）')
+    write_record(serial, 'b')
+    print(f'\n✅ B 槽已恢复联想官方 {TABLE["version"]}，全部读回一致。安全副本：{safety}')
     return True
