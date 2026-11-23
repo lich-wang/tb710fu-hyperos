@@ -218,6 +218,17 @@ def parse_vbmeta(vb):
     return r
 
 
+def key_blob(vb):
+    """The embedded AVB public key blob of a vbmeta blob (b'' when unsigned). ValueError if malformed."""
+    if vb[:4] != b'AVB0' or len(vb) < 256:
+        raise ValueError('不是 vbmeta')
+    auth, aux = struct.unpack_from('>QQ', vb, 12)
+    pk_off, pk_size = struct.unpack_from('>QQ', vb, 64)
+    if pk_off + pk_size > aux:
+        raise ValueError('vbmeta 损坏（公钥超出辅助块）')
+    return bytes(_span(vb, 256 + auth + pk_off, pk_size, '公钥'))
+
+
 def key_str(k):
     if not k:
         return '（未签名）'

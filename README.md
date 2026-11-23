@@ -52,7 +52,7 @@ ABL（未解锁，信任 AOSP testkey）
 ## 仓库结构
 
 ```
-tools/          tb710fu.py + tb/：doctor 环境检查、check 是否信任测试密钥、backup 9008 完整备份、pull 取联想组件、
+tools/          tb710fu.py + tb/：doctor 环境检查、check 是否信任测试密钥、abl 原厂 495 替换用的 CN 279 abl、backup 9008 完整备份、pull 取联想组件、
                 import 导入小米 OTA、vendor / framework 构建、bootchain 启动链与签名、package 刷机包、
                 flash / restore 9008 写入与写回、report 刷机报告信息
                 make_super.py、erofs_meta.py（构建用到）、lp_unpack.py、research/（研究脚本）、ci/、mac/displaymode.swift

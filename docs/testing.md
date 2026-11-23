@@ -71,6 +71,7 @@ python3 tools/tb710fu.py doctor --usb   # 环境和 9008 都通了再开始（�
 python3 tools/tb710fu.py check          # 只读：ABL 是否信任测试密钥，生成设备档案 work/device/latest.json
 python3 tools/tb710fu.py backup         # 只读：完整备份（二十多 GB，断了重跑会接着读）——备份目录另存一份！
 python3 tools/tb710fu.py pull           # 从备份取联想原厂组件（平板已不是原厂系统时：pull --package 联想官方包.7z）
+python3 tools/tb710fu.py abl 联想CN279包.7z   # 只有 check 说"联想原厂 495"时才要：取替换用的 CN 17.0.04.279 abl
 python3 tools/tb710fu.py import work/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip
 python3 tools/tb710fu.py vendor
 python3 tools/tb710fu.py framework
@@ -126,6 +127,8 @@ python3 tools/tb710fu.py report     # 原来的版本线索、ABL 状态和公�
   python3 tools/tb710fu.py package
   python3 tools/tb710fu.py flash --dry-run
   ```
+- **联想官方原厂 495**：它的 abl 只认联想自己的密钥，刷机时会把当前槽 abl 换成 CN 17.0.04.279 的（见 [boot-chain.md](boot-chain.md) 的"联想官方原厂 495 的 abl"）。
+  这个判断来自静态分析和 Y700 四代的实证，TB710FU 原厂 495 上的第一次刷入正是要验证它。报告里请写明 `check` 的结论。
 - **海外版（ROW）**：ROW 官方包的 rawprogram 是加密的，`pull --package` 用不了；平板还是原厂系统时可以 `pull` 自己的备份。
 - [porting.md](porting.md) 里标了"待真机"的项，例如设备兼容性矩阵缺的两个框架服务、联想自己的 lwky 服务。
 - 只验证过 yupei `OS4.0.5.0.XPZCNXM`；更新的小米版本 `import` 会提示未验证，需要 `--force`，结果请在报告里注明。

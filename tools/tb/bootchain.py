@@ -11,6 +11,8 @@ profile (check) and the device's full backup (backup). Output: work/build/bootch
   vbmeta_system                 testkey_rsa2048; system, system_ext, product + the device's own pvmfw
   bootchain.json                rollback indexes used, sha256 of every output, the checks done
 recovery and pvmfw are not written: the device keeps its own (their descriptors/keys must match, checked here).
+recovery is chained to the key the device's recovery is signed with: the test key, or Lenovo's own key on the stock
+ZUXOS 1.5.04.495 (whose ABL the package then replaces, see abl.py).
 Rollback indexes are exactly the device's current values: never raised, so stock firmware still boots later.
 
 Uses the AOSP avbtool + test keys in tools/avb/ and mkbootimg/unpack_bootimg in tools/mkbootimg/ (both in the
@@ -18,6 +20,7 @@ repository, see tools/THIRD_PARTY.md), and lz4.
 """
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
+from . import avb
 from .backup import file_sha256
 from .sources import TOOLS, WORK, SourceError
 from .vendor import fstab_add_erofs
@@ -270,7 +273,7 @@ def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None,
         need(k, 'AOSP external/avb/test/data 的测试密钥')
     slot = prof['slot']
     rb = {int(k): v for k, v in prof['rollback'].items()}
-    if prof.get('testkey') != 'trusted':
+    if prof.get('testkey') not in ('trusted', 'needs_abl'):
         raise SourceError('设备档案说 ABL 不信任测试密钥，不能构建')
     if any(k not in rb for k in (0, 2, 3)):
         raise SourceError(f'设备档案的回滚位置不全（{sorted(rb)}，要 0、2、3）：重跑 tb710fu.py check')
@@ -321,16 +324,38 @@ def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, b
     devkeys = {c['partition']: (c['key'] or {}).get('name') for c in devchains}
     if chains != want or dev != want:
         raise SourceError(f'链式布局不对：联想包 {chains}，设备 {dev}，预期 {want}')
-    if devkeys != {n: f'testkey_{k}' for n, (_, k) in CHAINS.items()}:
-        raise SourceError(f'设备链上的公钥不是预期的测试密钥：{devkeys}')
-    res['checks'].append(f'链式布局和公钥 {want}（联想包、设备一致）')
+    if prof['testkey'] == 'trusted':
+        # recovery is never written: after a first flash over stock 495 it is still Lenovo's (checked in step 2)
+        want_keys = {n: f'testkey_{k}' for n, (_, k) in CHAINS.items() if n != 'recovery'}
+        if {n: devkeys.get(n) for n in want_keys} != want_keys:
+            raise SourceError(f'设备链上的公钥不是预期的测试密钥：{devkeys}')
+        res['checks'].append(f'链式布局 {want}、boot 和 vbmeta_system 链的测试密钥（联想包、设备一致）')
+    else:
+        # stock 495: every chain is Lenovo's key; boot and vbmeta_system are rebuilt, recovery is chained to its key
+        if any(devkeys.values()):
+            raise SourceError(f'设备 abl 是联想原厂 495，但链上有测试密钥（{devkeys}）：不是原厂 495 的启动链，'
+                              '用 restore 或联想官方包恢复后重跑 check')
+        res['checks'].append(f'链式布局 {want}（联想包、设备一致）；设备链上是联想自己的密钥（原厂 495，abl 会换成 CN 279）')
 
     # 2. what the device keeps: recovery and pvmfw
     b = lambda n: need(os.path.join(backup_dir, f'{n}{slot}.bin'), '设备完整备份')  # noqa: E731
     rec = prof['vbmeta']['recovery']
-    if (rec.get('key') or {}).get('name') != 'testkey_rsa4096':
-        raise SourceError('设备 recovery 不是 testkey_rsa4096 签的，和新 vbmeta 的链对不上')
-    res['checks'].append(f'recovery 保留设备上的（testkey_rsa4096，回滚索引 {rec["rollback"]}）')
+    with open(b('recovery'), 'rb') as f:
+        rec_vb = avb.find_vbmeta(f.read())
+    if rec_vb is None:
+        raise SourceError('设备 recovery 没有 AVB 签名')
+    rec_v = avb.parse_vbmeta(rec_vb)
+    if rec_v['key'] != rec.get('key') or rec_v['rollback'] != rec.get('rollback'):
+        raise SourceError('备份里的 recovery 和设备档案记录的不一样（公钥或回滚索引）：重跑 check 和 backup')
+    rec_key = os.path.join(work, 'pk_recovery.bin')
+    with open(rec_key, 'wb') as f:
+        f.write(avb.key_blob(rec_vb))
+    # the key the recovery is really signed with decides the chain, whatever the ABL is (recovery is never written)
+    if not rec_v['key'] or rec_v['alg'] == 'NONE':
+        raise SourceError('设备 recovery 没有签名公钥，新 vbmeta 的 recovery 链对不上')
+    res['recovery_key_sha1'] = rec_v['key']['sha1']
+    res['checks'].append(f'recovery 保留设备上的（{avb.key_str(rec_v["key"])}，{rec_v["alg"]}，回滚索引 '
+                         f'{rec["rollback"]}）：vbmeta 的 recovery 链用这把公钥')
 
     # 3. boot images
     for n in ('init_boot', 'dtbo'):
@@ -338,8 +363,10 @@ def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, b
     boot = os.path.join(out, 'boot.img')
     shutil.copyfile(os.path.join(lenovo_dir, 'boot.img'), boot)
     bi = info(boot)
-    if bi['rollback'] != rb[3]:
-        print(f'  boot 回滚索引 {bi["rollback"]} ≠ 设备 {rb[3]}：重签', flush=True)
+    boot_testkey = f'Public key (sha1):        {TESTKEY4096_SHA1}' in bi['text']
+    if bi['rollback'] != rb[3] or not boot_testkey:
+        print(f'  boot 回滚索引 {bi["rollback"]}（设备 {rb[3]}）、'
+              f'{"testkey_rsa4096" if boot_testkey else "非测试密钥"}签名：按设备回滚索引用 testkey_rsa4096 重签', flush=True)
         avbtool('erase_footer', '--image', boot)
         cmd = ['add_hash_footer', '--image', boot, '--partition_name', 'boot', '--partition_size',
                os.path.getsize(os.path.join(lenovo_dir, 'boot.img')), '--salt', bi['salt'], '--key', K4096,
@@ -393,8 +420,9 @@ def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, b
     vb = os.path.join(out, 'vbmeta.img')
     cmd = ['make_vbmeta_image', '--output', vb, '--key', K4096, '--algorithm', 'SHA256_RSA4096',
            '--rollback_index', rb[0], '--flags', 0 if verity else 1, '--padding_size', VBMETA_PAD]
+    pk['recovery'] = rec_key
     for n, (loc, key) in CHAINS.items():
-        cmd += ['--chain_partition', f'{n}:{loc}:{pk[key]}']
+        cmd += ['--chain_partition', f'{n}:{loc}:{pk["recovery" if n == "recovery" else key]}']
     for n in VBMETA_HASH + VBMETA_TREE:
         cmd += ['--include_descriptors_from_image', os.path.join(out, f'{n}.img')]
     avbtool(*cmd)
@@ -419,11 +447,22 @@ def _build(out, prof, slot, rb, verity, lenovo_dir, vendor_dir, framework_dir, b
         raise SourceError('vbmeta 内嵌的公钥不是 testkey_rsa4096')
     cmd = ['verify_image', '--image', os.path.join(vdir, 'vbmeta.img'), '--follow_chain_partitions']
     for n, (loc, key) in CHAINS.items():
-        cmd += ['--expected_chain_partition', f'{n}:{loc}:{pk[key]}']
+        cmd += ['--expected_chain_partition', f'{n}:{loc}:{pk["recovery" if n == "recovery" else key]}']
     v = avbtool(*cmd)
     bad = [l for l in v.splitlines() if 'ERROR' in l or 'mismatch' in l.lower()]
     if bad:
         raise SourceError('自检失败：' + '; '.join(bad[:5]))
+    # verify_image checks every chained image against its own embedded key only, not against the key in the chain
+    # descriptor: compare the two here (what the bootloader does)
+    with open(os.path.join(vdir, 'vbmeta.img'), 'rb') as f:
+        top_v = avb.parse_vbmeta(avb.find_vbmeta(f.read()))
+    for c in top_v['chains']:
+        with open(os.path.join(vdir, f'{c["partition"]}.img'), 'rb') as f:
+            img_vb = avb.find_vbmeta(f.read())
+        own = avb.parse_vbmeta(img_vb)['key'] if img_vb else None
+        if not own or not c['key'] or own['sha1'] != c['key']['sha1']:
+            raise SourceError(f'自检失败：vbmeta 里 {c["partition"]} 链的公钥和 {c["partition"]} 自己的签名公钥不一致')
+    res['checks'].append('vbmeta 每条链的公钥 = 被链分区自己的签名公钥（boot、recovery、vbmeta_system）')
     res['checks'].append(f'avbtool verify_image --follow_chain_partitions 通过（{len(v.splitlines())} 行）')
     res['verify'] = v.splitlines()
     for n, want_rb in ((vb, rb[0]), (vs, rb[2]), (boot, rb[3])):
