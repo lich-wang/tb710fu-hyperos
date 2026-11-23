@@ -118,13 +118,13 @@ def check_aosp(r):
     print('\n[AOSP 工具和测试密钥]')
     avb = os.path.join(AVB_DIR, 'avbtool.py')
     if not os.path.isfile(avb):
-        r.fail('tools/avb/avbtool.py 没有', 'AOSP external/avb 的 avbtool.py 放到 tools/avb/')
+        r.fail('tools/avb/avbtool.py 没有', '仓库自带，重新检出仓库（git checkout -- tools/avb）')
         return
     r.ok('tools/avb/avbtool.py')
     for key, want in TESTKEY_SHA1.items():
         p = os.path.join(AVB_DIR, key)
         if not os.path.isfile(p):
-            r.fail(f'tools/avb/{key} 没有', 'AOSP external/avb/test/data 里的测试密钥')
+            r.fail(f'tools/avb/{key} 没有', '仓库自带，重新检出仓库（git checkout -- tools/avb）')
             continue
         tmp = os.path.join(WORK, f'.doctor-{key}.bin')
         os.makedirs(WORK, exist_ok=True)
@@ -135,12 +135,12 @@ def check_aosp(r):
         if got == want:
             r.ok(f'{key}（就是 AOSP 测试密钥）')
         else:
-            r.fail(f'{key} 不是 AOSP 的测试密钥（公钥 sha1 {got}）', '从 AOSP external/avb/test/data 重新取')
+            r.fail(f'{key} 不是 AOSP 的测试密钥（公钥 sha1 {got}）', '仓库自带，重新检出仓库（git checkout -- tools/avb）')
     for n in ('mkbootimg.py', 'unpack_bootimg.py'):
         if os.path.isfile(os.path.join(MKB_DIR, n)):
             r.ok(f'tools/mkbootimg/{n}')
         else:
-            r.fail(f'tools/mkbootimg/{n} 没有', 'AOSP system/tools/mkbootimg（连同 gki/ 目录）放到 tools/mkbootimg/')
+            r.fail(f'tools/mkbootimg/{n} 没有', '仓库自带，重新检出仓库（git checkout -- tools/mkbootimg）')
 
 
 # ---------------------------------------------------------------- downloads and disk

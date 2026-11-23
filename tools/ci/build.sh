@@ -2,16 +2,13 @@
 # CI build of the flash package from inputs already in $TB_WORK (the outputs of check, backup, pull and import:
 # device/latest.json, backup/<dir>, lenovo/<dir>, xiaomi/<version>; optional overlay/*.apk).
 #   TB_WORK           work directory with those inputs (build/ and out/ are recreated)
-#   TB_AVB_DIR        AOSP avbtool.py + testkey_rsa4096.pem / testkey_rsa2048.pem (linked to tools/avb)
-#   TB_MKBOOTIMG_DIR  AOSP mkbootimg.py / unpack_bootimg.py (linked to tools/mkbootimg)
 # Runs vendor, framework (with / without Find Device), bootchain twice and package; every step does its own checks
-# and stops with a non-zero exit on any mismatch. Nothing is written to a device.
+# and stops with a non-zero exit on any mismatch. Nothing is written to a device. The AOSP avbtool / test keys /
+# mkbootimg come with the repository (tools/avb, tools/mkbootimg).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 : "${TB_WORK:?set TB_WORK}"
 export TB_WORK
-[ -n "${TB_AVB_DIR:-}" ] && ln -sfn "$TB_AVB_DIR" tools/avb
-[ -n "${TB_MKBOOTIMG_DIR:-}" ] && ln -sfn "$TB_MKBOOTIMG_DIR" tools/mkbootimg
 rm -rf "$TB_WORK/build" "$TB_WORK/out"
 T() { echo "::group::tb710fu.py $*"; python3 -u tools/tb710fu.py "$@"; echo "::endgroup::"; }
 T vendor
