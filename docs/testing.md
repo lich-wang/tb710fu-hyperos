@@ -92,7 +92,8 @@ python3 tools/tb710fu.py flash --stage upgrade --dry-run   # 打印计划：supe
 python3 tools/tb710fu.py flash --stage upgrade             # 确认词 upgrade、flash；数据保留
 ```
 
-升级前请把个人文件另外备份：userdata 不能回滚，升级后开不了机只能清数据重刷或 `restore`。**不要用系统自带的更新**（#49）。
+升级前请把个人文件另外备份：userdata 不能回滚，升级后开不了机只能清数据重刷；`restore` 写回原系统后同样要清数据。
+升级只用于这台电脑两阶段刷好、之后没被 `restore` / `restore-stock` / 别的工具改过的平板（工具会核对）。**不要用系统自带的更新**（#49）。
 
 - 每一步都有自己的检查，不通过就停下并说明原因；按提示处理，不要改代码绕过。
 - 也可以在构建完成前先跑 `check`，把结论发出来：这本身就是有用的测试数据。
