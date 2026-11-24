@@ -69,10 +69,14 @@ def patch_role_table(text):
         body = text[s:e]
         if ROLE_ANCHOR not in body:
             continue
-        put = re.search(r'^\s*iput-object v\d+, p0, %s->(\w+):Landroid/util/SparseIntArray;\s*$' % re.escape(cls),
-                        body, re.M)
-        if not put:
+        puts = list(re.finditer(r'^\s*iput-object v\d+, p0, %s->(\w+):Landroid/util/SparseIntArray;\s*$'
+                                % re.escape(cls), body, re.M))
+        if not puts:
             continue
+        if len({m.group(1) for m in puts}) != 1:
+            raise SourceError('小米相机：角色表方法里给多个 SparseIntArray 字段赋值（'
+                              + '、'.join(sorted({m.group(1) for m in puts})) + '），认不出哪个是角色表：不打补丁')
+        put = puts[-1]
         ex = re.search(r'^(\s*)monitor-exit p0\s*$', body[put.end():], re.M)
         if not ex:
             continue
@@ -196,7 +200,8 @@ def tools():
 
 def _sdk_tool(name):
     roots = [os.environ.get('ANDROID_HOME'), os.environ.get('ANDROID_SDK_ROOT'),
-             os.path.expanduser('~/Library/Android/sdk'), '/opt/homebrew/share/android-commandlinetools']
+             os.path.expanduser('~/Library/Android/sdk'), os.path.expanduser('~/Android/Sdk'),
+             '/opt/homebrew/share/android-commandlinetools', '/usr/local/share/android-commandlinetools']
     for r in filter(None, roots):
         cands = sorted(glob.glob(os.path.join(r, 'build-tools', '*', name)))
         if cands:

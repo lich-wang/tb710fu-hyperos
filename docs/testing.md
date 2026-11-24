@@ -37,7 +37,9 @@
 ```bash
 # macOS
 brew install e2fsprogs erofs-utils lz4 sevenzip python@3.12 gh openjdk apktool
-# zipalign / apksigner：Android SDK build-tools（安装时要接受 Android SDK 许可）
+# zipalign / apksigner：Android SDK build-tools（安装时要接受 Android SDK 许可）。
+# Homebrew 的 openjdk 是 keg-only，sdkmanager 找不到它，先在当前终端指过去：
+export JAVA_HOME="$(brew --prefix openjdk)/libexec/openjdk.jdk/Contents/Home" PATH="$(brew --prefix openjdk)/bin:$PATH"
 brew install --cask android-commandlinetools && sdkmanager "build-tools;36.0.0"
 # Debian / Ubuntu
 sudo apt install e2fsprogs erofs-utils lz4 7zip python3 gh default-jre-headless apktool zipalign apksigner
