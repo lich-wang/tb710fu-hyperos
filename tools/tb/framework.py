@@ -327,6 +327,9 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
     where = miuicamera.build(cam, patched, os.path.join(out, 'miuicamera'))
     os.replace(patched, cam)                      # same path: keeps the official uid/gid/mode/SELinux label
     shutil.rmtree(os.path.join(cam_dir, 'oat'), ignore_errors=True)
+    left = sorted(set(os.listdir(cam_dir)) - {'MiuiCamera.apk'})
+    if left:
+        raise SourceError(f'priv-app/MiuiCamera 里多出 {left}：打补丁不该留下别的文件')
     changes['product'].append(f'priv-app/MiuiCamera：前摄角色表（{where["role_table"]}）、persist 自检'
                               f'（{where["lut_check"]}），测试密钥重签，去掉旧的 oat/')
     if not keep_finddevice:

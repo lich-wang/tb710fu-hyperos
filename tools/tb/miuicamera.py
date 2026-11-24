@@ -233,8 +233,11 @@ def build(apk, out_apk, work):
     run([t['apktool'], 'b', '-o', unsigned, dec], 'apktool 重新打包小米相机')
     aligned = os.path.join(work, 'aligned.apk')
     run([t['zipalign'], '-f', '-p', '4', unsigned, aligned], 'zipalign')
-    run([t['apksigner'], 'sign', '--key', os.path.join(KEY_DIR, 'testkey.pk8'),
-         '--cert', os.path.join(KEY_DIR, 'testkey.x509.pem'), '--out', out_apk, aligned], 'apksigner 签名')
-    run([t['apksigner'], 'verify', out_apk], 'apksigner 核对签名')
+    signed = os.path.join(work, 'signed.apk')
+    # v1-v3 signatures in the APK; no v4 .idsig side file (only incremental install uses it), so only the APK leaves work/
+    run([t['apksigner'], 'sign', '--v4-signing-enabled', 'false', '--key', os.path.join(KEY_DIR, 'testkey.pk8'),
+         '--cert', os.path.join(KEY_DIR, 'testkey.x509.pem'), '--out', signed, aligned], 'apksigner 签名')
+    run([t['apksigner'], 'verify', signed], 'apksigner 核对签名')
+    shutil.copyfile(signed, out_apk)
     shutil.rmtree(work, ignore_errors=True)
     return {'role_table': role, 'lut_check': lut}
