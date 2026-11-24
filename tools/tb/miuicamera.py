@@ -18,7 +18,7 @@ The APK is then rebuilt with apktool, zip-aligned and signed with the AOSP test 
 tools/THIRD_PARTY.md); its prebuilt oat/ (compiled against the original dex) is dropped by the caller.
 Needs Java, apktool, zipalign and apksigner (Android SDK build-tools).
 """
-import glob, os, re, shutil, subprocess
+import glob, os, re, shutil, subprocess, zipfile
 
 from .sources import TOOLS, SourceError
 
@@ -223,19 +223,60 @@ def run(cmd, what):
     return p.stdout
 
 
+SIGNATURE_FILES = re.compile(r'^META-INF/([^/]+\.(SF|RSA|DSA|EC)|MANIFEST\.MF)$', re.I)
+
+
+def _dex_of(smali_rel):
+    """smali/... -> classes.dex, smali_classes7/... -> classes7.dex"""
+    top = smali_rel.split('/', 1)[0]
+    return 'classes.dex' if top == 'smali' else top.replace('smali_', '') + '.dex'
+
+
 def build(apk, out_apk, work):
-    """Patched, aligned and signed copy of apk at out_apk; returns what changed (for framework.json)."""
+    """Patched, aligned and signed copy of apk at out_apk; returns what changed (for framework.json).
+
+    Only the dex files go through apktool: an APK holds entries whose names differ only in case (Xiaomi's
+    obfuscated res/-KN.xml and res/-kn.xml), which a case-insensitive file system (macOS) merges when the whole
+    APK is unpacked to disk. So the result is the original APK, entry by entry (same order, name, compression),
+    with only the patched dex replaced and the old signature files dropped; then zipalign and apksigner.
+    """
     t = tools()
     for n in ('testkey.pk8', 'testkey.x509.pem'):
         if not os.path.isfile(os.path.join(KEY_DIR, n)):
             raise SourceError(f'缺 tools/apksign/{n}（仓库自带，重新检出）')
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
+    with zipfile.ZipFile(apk) as z:
+        names = z.namelist()
+        if len(set(names)) != len(names):
+            raise SourceError('小米相机 APK 里有重名的条目：不打补丁')
+        dexes = [n for n in names if re.fullmatch(r'classes\d*\.dex', n)]
+        # a dex-only copy for apktool (the manifest so apktool accepts it, no resources)
+        dex_apk = os.path.join(work, 'dex-only.apk')
+        with zipfile.ZipFile(dex_apk, 'w', zipfile.ZIP_DEFLATED) as d:
+            for n in ['AndroidManifest.xml'] + dexes:
+                d.writestr(n, z.read(n))
     dec = os.path.join(work, 'decoded')
-    run([t['apktool'], 'd', '-r', '-f', '-o', dec, apk], 'apktool 解包小米相机')
+    run([t['apktool'], 'd', '-r', '-f', '-o', dec, dex_apk], 'apktool 解包小米相机的 dex')
     role, lut = patch_tree(dec)
+    rebuilt = os.path.join(work, 'rebuilt.apk')
+    run([t['apktool'], 'b', '-o', rebuilt, dec], 'apktool 重新打包小米相机的 dex')
+    patched = {_dex_of(role), _dex_of(lut)}
+    with zipfile.ZipFile(rebuilt) as r:
+        new_dex = {n: r.read(n) for n in patched}
     unsigned = os.path.join(work, 'unsigned.apk')
-    run([t['apktool'], 'b', '-o', unsigned, dec], 'apktool 重新打包小米相机')
+    with zipfile.ZipFile(apk) as z, zipfile.ZipFile(unsigned, 'w') as u:
+        for info in z.infolist():
+            if SIGNATURE_FILES.match(info.filename):
+                continue
+            data = new_dex[info.filename] if info.filename in new_dex else z.read(info)
+            out = zipfile.ZipInfo(info.filename, info.date_time)
+            out.compress_type, out.external_attr = info.compress_type, info.external_attr
+            u.writestr(out, data)
+    with zipfile.ZipFile(apk) as z, zipfile.ZipFile(unsigned) as u:
+        want = [n for n in z.namelist() if not SIGNATURE_FILES.match(n)]
+        if u.namelist() != want:
+            raise SourceError('小米相机：重新打包后的条目和原 APK 对不上：不打补丁')
     aligned = os.path.join(work, 'aligned.apk')
     run([t['zipalign'], '-f', '-p', '4', unsigned, aligned], 'zipalign')
     signed = os.path.join(work, 'signed.apk')
@@ -243,6 +284,14 @@ def build(apk, out_apk, work):
     run([t['apksigner'], 'sign', '--v4-signing-enabled', 'false', '--key', os.path.join(KEY_DIR, 'testkey.pk8'),
          '--cert', os.path.join(KEY_DIR, 'testkey.x509.pem'), '--out', signed, aligned], 'apksigner 签名')
     run([t['apksigner'], 'verify', signed], 'apksigner 核对签名')
+    with zipfile.ZipFile(apk) as z, zipfile.ZipFile(signed) as g:
+        orig = {n for n in z.namelist() if not SIGNATURE_FILES.match(n)}
+        got = {n for n in g.namelist() if not SIGNATURE_FILES.match(n)}
+        if orig != got:
+            raise SourceError(f'小米相机：签名后的条目和原 APK 不一致（少 {len(orig - got)}、多 {len(got - orig)}）：不打补丁')
+        changed = sorted(n for n in orig if z.getinfo(n).CRC != g.getinfo(n).CRC)
+        if set(changed) != patched:
+            raise SourceError(f'小米相机：内容变了的条目是 {changed}，应只有 {sorted(patched)}：不打补丁')
     shutil.copyfile(signed, out_apk)
     shutil.rmtree(work, ignore_errors=True)
-    return {'role_table': role, 'lut_check': lut}
+    return {'role_table': role, 'lut_check': lut, 'dex': sorted(patched)}
