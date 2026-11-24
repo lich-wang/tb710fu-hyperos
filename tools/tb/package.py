@@ -108,6 +108,8 @@ def build(find_dir=None, nofind_dir=None, allow_debug=False):
     try:
         manifest = _assemble(tmp, bc, fwv, prof, dev, slot, super_size, find_dir, nofind_dir)
         if os.path.exists(final):
+            from .flash import remember_package
+            remember_package(final)         # flash records made before fingerprints name the package being replaced
             old = tempfile.mkdtemp(prefix=f'.{tag}-old-', dir=root)
             os.rmdir(old)
             os.rename(final, old)

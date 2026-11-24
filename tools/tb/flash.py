@@ -357,6 +357,31 @@ def device_matches(src, slot, fp):
             and hashlib.sha256(src.read_range('super', 0, HEAD)).hexdigest() == fp['super_head'])
 
 
+def known_path(pkg_id):
+    return os.path.join(WORK, 'flash', 'packages', f'{pkg_id}.json')
+
+
+def remember_package(pkg):
+    """`package` is about to replace pkg: keep what is needed to recognise a tablet flashed from it.
+
+    Records made before the fingerprint and version fields only name the package; without this, rebuilding the same
+    Xiaomi version (to pick up fixes, the usual reason to upgrade) would leave such a record unverifiable.
+    """
+    mf = os.path.join(pkg, 'manifest.json')
+    try:
+        with open(mf) as f:
+            m = json.load(f)
+        info = {'version': m['inputs']['xiaomi']['version'],
+                'fp': fingerprint_of(pkg, m, m['plan']['after_setup'], m['device']['slot'])}
+    except (OSError, ValueError, KeyError, TypeError):
+        return                              # not a complete package: nothing a record could point at
+    path = known_path(file_sha256(mf))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + '.tmp', 'w') as f:
+        json.dump(info, f)
+    os.replace(path + '.tmp', path)
+
+
 def recorded_package(pkg_id):
     """The package directory under work/out whose manifest.json has sha256 pkg_id (records made before the
     fingerprint and version fields existed only name the package)."""
@@ -379,14 +404,23 @@ def upgrade_plan(src, m, slot, rec):
     old, accepted = rec.get('version'), [x for x in (rec.get('fp'), rec.get('pending')) if x]
     if not accepted or not old:
         # a record from before these fields: take them from the package it names
-        opkg = recorded_package(rec.get('package', ''))
-        if not opkg:
-            raise SourceError('记录里没有平板现状的指纹，work/out 里也找不到记录所指的刷机包：核对不了平板上跑的是不是'
-                              '本项目刷的系统，不升级')
-        om = load_package(opkg)
-        old = old or om['inputs']['xiaomi']['version']
+        pkg_id = rec.get('package', '')
+        opkg = recorded_package(pkg_id)
+        if opkg:
+            om = load_package(opkg)
+            known = {'version': om['inputs']['xiaomi']['version'],
+                     'fp': fingerprint_of(opkg, om, om['plan']['after_setup'], slot)}
+        else:
+            # rebuilt since: package kept the fingerprint of the one it replaced
+            try:
+                with open(known_path(pkg_id)) as f:
+                    known = json.load(f)
+            except (OSError, ValueError):
+                raise SourceError('记录里没有平板现状的指纹，work/out 里也找不到记录所指的刷机包：核对不了平板上跑的是不是'
+                                  '本项目刷的系统，不升级')
+        old = old or known['version']
         if not accepted:
-            accepted = [fingerprint_of(opkg, om, om['plan']['after_setup'], slot)]
+            accepted = [known['fp']]
     if not any(device_matches(src, slot, fp) for fp in accepted):
         raise SourceError('平板上的 vbmeta_system / super 开头不是这台电脑上次刷的（之后用 restore、恢复原厂或别的工具刷过？）：'
                           '不升级。要装就按 flash --stage first 重刷')
