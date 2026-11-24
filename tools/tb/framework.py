@@ -9,15 +9,16 @@ Every change and its reason is listed in docs/porting.md ("框架侧"). In short
   product     mi_ext/product merged in (same reason as pangu); build.prop: 4 KiB pages, no lcd_density,
               Xiaomi Pad 8 identity taken from the yupei odm (the Lenovo odm would otherwise make the device
               "TB710FU" to the Xiaomi framework), stylus on, skiagl, incremental ".DEV" (Xiaomi account);
-              the two USB NCM overlays from work/overlay/ when present
+              the two USB NCM overlays from work/overlay/ when present; Xiaomi Camera patched for the Lenovo camera
+              HAL (front camera role, persist check; tb/miuicamera.py, #48), its stale prebuilt oat/ dropped
 Files keep the uid/gid/mode/SELinux label of the official images; added files take them from a named source.
 
 Output: work/build/framework/<version>[-nofind][-debug]/{system,system_ext,product}.img + framework.json.
-Needs erofs-utils (fsck.erofs, mkfs.erofs).
+Needs erofs-utils (fsck.erofs, mkfs.erofs), and for the camera fix Java, apktool, zipalign and apksigner.
 """
 import glob, json, os, shutil, stat, subprocess, sys, tarfile, time, uuid
 
-from . import layout
+from . import layout, miuicamera
 from .backup import file_sha256
 from .sources import WORK, SourceError
 
@@ -317,6 +318,17 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
             changes['product'].append('overlay/' + ov)
         else:
             print(f'  ⚠ 没有 work/overlay/{ov}：USB 网络共享（NCM）在 Mac 上可能用不了（见 hyperos/README.md）')
+    cam_dir = os.path.join(P.root, 'priv-app', 'MiuiCamera')
+    cam = os.path.join(cam_dir, 'MiuiCamera.apk')
+    if not os.path.isfile(cam):
+        raise SourceError('product 里没有 priv-app/MiuiCamera/MiuiCamera.apk：这个小米版本没核对过')
+    print('  小米相机前摄修复（apktool 解包 → 补角色表、去 persist 自检 → 重新打包签名）…', flush=True)
+    patched = cam + '.tb710fu'
+    where = miuicamera.build(cam, patched, os.path.join(out, 'miuicamera'))
+    os.replace(patched, cam)                      # same path: keeps the official uid/gid/mode/SELinux label
+    shutil.rmtree(os.path.join(cam_dir, 'oat'), ignore_errors=True)
+    changes['product'].append(f'priv-app/MiuiCamera：前摄角色表（{where["role_table"]}）、persist 自检'
+                              f'（{where["lut_check"]}），测试密钥重签，去掉旧的 oat/')
     if not keep_finddevice:
         shutil.rmtree(os.path.join(P.root, 'priv-app', 'MIUIFindDeviceCN'), ignore_errors=True)
         changes['product'].append('去掉 priv-app/MIUIFindDeviceCN（开机向导用）')

@@ -6,7 +6,7 @@ and resets it. Nothing is written to the tablet.
 """
 import glob, hashlib, os, platform, re, shutil, subprocess, sys, time
 
-from . import sources
+from . import miuicamera, sources
 from .sources import TOOLS, WORK, SourceError
 
 AVB_DIR, MKB_DIR = os.path.join(TOOLS, 'avb'), os.path.join(TOOLS, 'mkbootimg')
@@ -112,6 +112,23 @@ def check_computer(r):
         r.ok('adb（可选：已 root 时 adb reboot edl、刷完后取日志）')
     else:
         r.note('没有 adb（可选，刷完后取日志要用）', install_hint('android-platform-tools', 'adb'))
+    check_camera_tools(r)
+
+
+def check_camera_tools(r):
+    """framework patches Xiaomi Camera (front camera on the Lenovo HAL, #48): Java, apktool, zipalign, apksigner."""
+    hints = {
+        'java': install_hint('openjdk', 'default-jre-headless'),
+        'apktool': install_hint('apktool', 'apktool'),
+        'zipalign': 'Debian / Ubuntu: sudo apt install zipalign；macOS: Android SDK build-tools（见 docs/testing.md）',
+        'apksigner': 'Debian / Ubuntu: sudo apt install apksigner；macOS: Android SDK build-tools（见 docs/testing.md）',
+    }
+    for n in ('java', 'apktool', 'zipalign', 'apksigner'):
+        p = miuicamera.find(n)
+        if p:
+            r.ok(f'{n}（{p}，小米相机前摄修复）')
+        else:
+            r.fail(f'没有 {n}（framework 给小米相机打前摄补丁要用）', hints[n])
 
 
 def check_aosp(r):
@@ -136,6 +153,11 @@ def check_aosp(r):
             r.ok(f'{key}（就是 AOSP 测试密钥）')
         else:
             r.fail(f'{key} 不是 AOSP 的测试密钥（公钥 sha1 {got}）', '仓库自带，重新检出仓库（git checkout -- tools/avb）')
+    for n in ('testkey.pk8', 'testkey.x509.pem'):
+        if os.path.isfile(os.path.join(TOOLS, 'apksign', n)):
+            r.ok(f'tools/apksign/{n}（小米相机重签用的 AOSP 测试密钥）')
+        else:
+            r.fail(f'tools/apksign/{n} 没有', '仓库自带，重新检出仓库（git checkout -- tools/apksign）')
     for n in ('mkbootimg.py', 'unpack_bootimg.py'):
         if os.path.isfile(os.path.join(MKB_DIR, n)):
             r.ok(f'tools/mkbootimg/{n}')
