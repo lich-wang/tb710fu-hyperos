@@ -19,7 +19,7 @@ dex swapped in, zip-aligned and signed with the AOSP test key (tools/apksign/, s
 prebuilt oat/ (compiled against the original dex) is dropped by the caller.
 Needs Java, apktool, zipalign and apksigner (Android SDK build-tools).
 """
-import glob, os, re, shutil, subprocess, zipfile
+import glob, os, re, shutil, subprocess, zipfile, zlib
 
 from .sources import TOOLS, SourceError
 
@@ -248,9 +248,10 @@ def build(apk, out_apk, work):
 
     Only the dex files go through apktool: an APK holds entries whose names differ only in case (Xiaomi's
     obfuscated res/-KN.xml and res/-kn.xml), which a case-insensitive file system (macOS) merges when the whole
-    APK is unpacked to disk. So the result is the original APK, entry by entry (same order, name and compression
-    method; the deflate output is this host's zlib), with only the patched dex replaced and the old signature files
-    dropped; then zipalign and apksigner. The work directory is removed afterwards, also on failure.
+    APK is unpacked to disk. So the result is the original APK, entry by entry (same order and name, the original
+    compressed bytes copied as they are, see repack()), with only the patched dex replaced (stored) and the old
+    signature files dropped; then zipalign and apksigner. Byte-reproducible given the same apktool / smali.
+    The work directory is removed afterwards, also on failure.
     """
     t = tools()
     for n in ('testkey.pk8', 'testkey.x509.pem'):
@@ -284,18 +285,11 @@ def _build(t, apk, out_apk, work):
     with zipfile.ZipFile(rebuilt) as r:
         new_dex = {n: r.read(n) for n in patched}
     unsigned = os.path.join(work, 'unsigned.apk')
-    with zipfile.ZipFile(apk) as z, zipfile.ZipFile(unsigned, 'w') as u:
-        for info in z.infolist():
-            if SIGNATURE_FILES.match(info.filename):
-                continue
-            data = new_dex[info.filename] if info.filename in new_dex else z.read(info)
-            out = zipfile.ZipInfo(info.filename, info.date_time)
-            out.compress_type, out.external_attr = info.compress_type, info.external_attr
-            u.writestr(out, data)
+    repack(apk, unsigned, new_dex)
     with zipfile.ZipFile(apk) as z, zipfile.ZipFile(unsigned) as u:
         want = [n for n in z.namelist() if not SIGNATURE_FILES.match(n)]
-        if u.namelist() != want:
-            raise SourceError('小米相机：重新打包后的条目和原 APK 对不上：不打补丁')
+        if u.namelist() != want or u.testzip() is not None:
+            raise SourceError('小米相机：重新打包后的条目和原 APK 对不上（或校验和不对）：不打补丁')
     aligned = os.path.join(work, 'aligned.apk')
     run([t['zipalign'], '-f', '-p', '4', unsigned, aligned], 'zipalign')
     signed = os.path.join(work, 'signed.apk')
@@ -314,6 +308,48 @@ def _build(t, apk, out_apk, work):
             raise SourceError(f'小米相机：内容变了的条目是 {changed}，应只有 {sorted(patched)}：不打补丁')
     shutil.copyfile(signed, out_apk)
     return {'role_table': role, 'lut_check': lut, 'dex': sorted(patched), 'tools': versions(t)}
+
+
+def repack(src_apk, dst, replace):
+    """dst = src_apk without its signature files; every other entry keeps its compressed bytes exactly as they are
+    (no recompression, so the result does not depend on this host's zlib), the entries in `replace` are stored
+    uncompressed (Android reads uncompressed dex directly). Same order, names, method and timestamps; no extra fields
+    or data descriptors (zipalign pads, apksigner signs)."""
+    import struct
+    with zipfile.ZipFile(src_apk) as z, open(src_apk, 'rb') as f, open(dst, 'wb') as o:
+        central = []
+        for info in z.infolist():
+            if SIGNATURE_FILES.match(info.filename):
+                continue
+            name = info.filename.encode('utf-8')
+            flags = 0x800 if any(ord(c) > 127 for c in info.filename) else 0
+            if info.filename in replace:
+                data = replace[info.filename]
+                method, crc, csize, usize = zipfile.ZIP_STORED, zlib.crc32(data) & 0xffffffff, len(data), len(data)
+            else:
+                f.seek(info.header_offset)
+                sig, *_rest, nlen, elen = struct.unpack('<IHHHHHIIIHH', f.read(30))
+                if sig != 0x04034b50 or info.flag_bits & 1:
+                    raise SourceError(f'小米相机：{info.filename} 的本地头不对或是加密的：不打补丁')
+                f.seek(info.header_offset + 30 + nlen + elen)
+                data = f.read(info.compress_size)
+                method, crc, csize, usize = info.compress_type, info.CRC, info.compress_size, info.file_size
+            if max(csize, usize, o.tell()) >= 0xffffffff:
+                raise SourceError('小米相机：APK 需要 zip64，不打补丁')
+            y, mo, d, h, mi, sec = info.date_time
+            dtime, ddate = (h << 11) | (mi << 5) | (sec // 2), ((y - 1980) << 9) | (mo << 5) | d
+            off = o.tell()
+            o.write(struct.pack('<IHHHHHIIIHH', 0x04034b50, 20, flags, method, dtime, ddate, crc, csize, usize,
+                                len(name), 0) + name)
+            o.write(data)
+            central.append(struct.pack('<IHHHHHHIIIHHHHHII', 0x02014b50, 20, 20, flags, method, dtime, ddate, crc,
+                                       csize, usize, len(name), 0, 0, 0, 0, 0, off) + name)
+        cd_off = o.tell()
+        for c in central:
+            o.write(c)
+        if len(central) >= 0xffff or cd_off >= 0xffffffff:
+            raise SourceError('小米相机：APK 需要 zip64，不打补丁')
+        o.write(struct.pack('<IHHHHIIH', 0x06054b50, 0, 0, len(central), len(central), o.tell() - cd_off, cd_off, 0))
 
 
 def versions(t):
