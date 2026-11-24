@@ -113,6 +113,7 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
   - **system**：
     - `build.prop` 注掉 `media.settings.xml`（联想 vendor 没有 `media_profiles_vendor.xml`，zygote 会 abort）；
     - 加 Lenovo Tab Pen Plus 按键映射；
+    - 加磁吸皮套按键映射 `hall_irq.kl`（#54）：霍尔传感器 `hall_irq` 合 / 开时发的是按键 252 / 253，不是 `SW_LID`，安卓的合盖休眠收不到；映射成 `SLEEP`（合上）/ `WAKEUP`（打开）。合 / 开对应哪个码按 `getevent` 抓到的顺序推断，真机核对；
     - 加 `etc/init/tb710fu.rc`：手写笔、双击唤醒、高触控采样率接到联想触摸驱动的 `/proc` 节点，lwky 的其余部分都不要；
     - `product/pangu/system` 和 mi_ext 的系统权限文件移进来。小米 vendor 开机时会把它们叠上去，联想 vendor 不会；com.tms.* NFC jar 不带。
   - **system_ext**：不改，直接复制。
