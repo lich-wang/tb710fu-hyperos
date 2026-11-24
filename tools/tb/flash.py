@@ -6,6 +6,10 @@ Stages (manifest.json "plan"):
                When the package replaces the stock 495 ABL (manifest device.abl), also abl of the current slot: only
                the pinned CN 279 ABL (abl.py), only over the exact ABL check saw (or over itself on a re-run).
   after-setup  vbmeta_system + super with Find Device; data kept. Only allowed when the tablet is in stage first.
+  upgrade      a newer (or the same) Xiaomi version, or a rebuild with more of this project's fixes, onto a tablet
+               this computer has fully flashed (after-setup or an earlier upgrade): super + vbmeta_system of the
+               variant the tablet runs (with / without Find Device), plus every boot chain image that differs from
+               what the tablet has. Data kept; never a downgrade; the ABL must already be the one stage first wrote.
 restore        boot chain of the current slot (with recovery and abl) + super from the device's own full backup.
 
 What is never done: writing the GPT, the other slot, firmware below the boot chain (abl only as above), or any
@@ -289,8 +293,72 @@ def short_serial(s):
     return f'{s[:3]}…{s[-3:]}' if s and len(s) > 6 else (s or '?')
 
 
+VERSION_RE = r'OS(\d+)\.(\d+)\.(\d+)\.(\d+)'
+
+
+def version_key(v):
+    """OS4.0.5.0.XPZCNXM -> (4, 0, 5, 0); None when it does not look like a HyperOS version.
+
+    >>> version_key('OS4.0.5.0.XPZCNXM') < version_key('OS4.0.10.0.XPZCNXM')
+    True
+    >>> version_key('V816') is None
+    True
+    """
+    import re
+    m = re.match(VERSION_RE, v or '')
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def read_record(serial):
+    try:
+        with open(state_path(serial)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def upgrade_plan(src, m, slot, rec):
+    """What `upgrade` writes: super + vbmeta_system of the tablet's variant, and the boot chain images that differ."""
+    if rec.get('stage') not in ('after-setup', 'upgrade'):
+        raise SourceError('这台电脑上没有这台平板两阶段都刷完（after-setup）的记录：upgrade 只用于已经用本项目刷好的平板。'
+                          '没刷过就按 flash --stage first / after-setup 刷')
+    new = m['inputs']['xiaomi']['version']
+    old = rec.get('version')
+    if version_key(new) is None:
+        raise SourceError(f'刷机包的小米版本 {new} 认不出来：不升级')
+    if old:
+        if version_key(old) is None or version_key(new) < version_key(old):
+            raise SourceError(f'刷机包的小米版本 {new} 比平板上的 {old} 旧：不降级（数据只能往新版本迁移）')
+        print(f'小米版本：{old} → {new}')
+    else:
+        print(f'⚠ 这台平板的刷写记录没有版本号（旧记录）：按刷机包的 {new} 升级，请确认平板上不是更新的版本')
+    find = rec.get('find', True)            # an after-setup record without the field: the Find Device variant
+    variant = m['plan']['after_setup'] if find else {k: v for k, v in m['plan']['first'].items()
+                                                     if k in (f'vbmeta_system{slot}', 'super')}
+    plan = dict(variant)
+    abl_part = f'abl{slot}'
+    if m['device'].get('abl'):
+        f = m['files'][m['plan']['first'][abl_part]]
+        cur = hashlib.sha256(src.read_range(abl_part, 0, f['bytes'])).hexdigest()
+        if cur != abl_mod.PINNED['sha256']:
+            raise SourceError(f'平板上的 {abl_part} 不是第一阶段写的 CN 279 abl：不能只升级，按 first 重刷')
+    same = []
+    for d, f in m['plan']['first'].items():
+        if d in plan or d in (abl_part, f'vbmeta_system{slot}', 'super'):
+            continue
+        info = m['files'][f]
+        target(src, d, info['bytes'])
+        if hashlib.sha256(src.read_range(d, 0, info['bytes'])).hexdigest() != info['sha256']:
+            plan[d] = f
+        else:
+            same.append(d)
+    print(f'启动链：{"、".join(sorted(same)) or "无"}和平板上的一样，不写'
+          + (f'；{"、".join(sorted(set(plan) - set(variant)))} 有变化，一起写' if set(plan) - set(variant) else ''))
+    return plan, find
+
+
 def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
-    """Flash stage `first` or `after-setup` of package directory pkg. Returns True when the tablet may reset."""
+    """Flash stage `first`, `after-setup` or `upgrade` of package directory pkg. Returns True when the tablet may reset."""
     m = load_package(pkg)
     dev = m['device']
     slot = dev['slot']
@@ -304,7 +372,11 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     low = {k: (rb_pkg.get(k), v) for k, v in rb_dev.items() if rb_pkg.get(k) is None or rb_pkg[k] < v}
     if low:
         raise SourceError(f'刷机包的回滚索引低于平板上现在的镜像 {low}（位置: (包, 设备)）：会启动不了，重建刷机包')
-    plan = m['plan']['first' if stage == 'first' else 'after_setup']
+    find = stage != 'first'
+    if stage == 'upgrade':
+        plan, find = upgrade_plan(src, m, slot, read_record(dev['chip_serial']))
+    else:
+        plan = m['plan']['first' if stage == 'first' else 'after_setup']
     allowed = {f'{n}{slot}' for n in BOOT_CHAIN} | {'super'}
     abl_part = f'abl{slot}'
     if stage == 'first' and dev.get('abl'):
@@ -324,11 +396,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     pkg_id = file_sha256(os.path.join(pkg, 'manifest.json'))
     if stage == 'after-setup':
         # only after a complete stage first of this very package on this tablet
-        try:
-            with open(state_path(dev['chip_serial'])) as f:
-                rec = json.load(f)
-        except (OSError, ValueError):
-            rec = {}
+        rec = read_record(dev['chip_serial'])
         if rec.get('stage') != 'first' or rec.get('package') != pkg_id:
             raise SourceError('这台电脑上没有这个刷机包第一阶段完整写完的记录：先做 flash --stage first（它全部成功才会留记录）')
         cur = src.read_range(f'vbmeta_system{slot}', 0, m['files']['vbmeta_system_nofind.img']['bytes'])
@@ -364,13 +432,17 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     if stage == 'after-setup':
         confirm('\n第二阶段只能在开机向导完成之后做（向导里没登录小米账号、没开查找设备）。向导已经完成了吗？',
                 'setup-done', assume_yes)
+    if stage == 'upgrade':
+        confirm('\n升级不清数据，开机时系统自己迁移。userdata 不能回滚（TEE 防回滚）：升级后开不了机只能清数据重刷'
+                '或用 restore 写回原系统，个人文件请先另外备份。确认升级吗？', 'upgrade', assume_yes)
     confirm('\n确认写入上面这些分区？', 'flash', assume_yes)
     if wipes:
         confirm('\n第一阶段还要清零 metadata 和 userdata 开头（恢复出厂，平板上的用户数据全部丢失；'
                 '不清的话新系统多半进不去）。不同意就什么都不写。', 'wipe', assume_yes)
     def drop_record():
-        # the first write is about to happen: an earlier completion record no longer describes the tablet
-        if os.path.exists(state_path(dev['chip_serial'])):
+        # the first write is about to happen: an earlier completion record no longer describes the tablet.
+        # An upgrade keeps it: the tablet stays a flashed one, and an interrupted upgrade may be run again.
+        if stage != 'upgrade' and os.path.exists(state_path(dev['chip_serial'])):
             os.remove(state_path(dev['chip_serial']))
     with tempfile.TemporaryDirectory(dir=WORK) as t:
         w = Writer(src, t, before_first_write=drop_record)
@@ -382,7 +454,8 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     same_table_after(src, table, flags)
     os.makedirs(os.path.dirname(state_path(dev['chip_serial'])), exist_ok=True)
     with open(state_path(dev['chip_serial']), 'w') as f:
-        json.dump({'stage': stage, 'package': pkg_id, 'finished': time.strftime('%Y-%m-%dT%H:%M:%S%z')}, f)
+        json.dump({'stage': stage, 'package': pkg_id, 'version': m['inputs']['xiaomi']['version'], 'find': find,
+                   'finished': time.strftime('%Y-%m-%dT%H:%M:%S%z')}, f)
     print('\n✅ 写入完成，全部读回一致，分区表和属性没变')
     if stage == 'first':
         print('开机后过开机向导：不要登录小米账号、不要开“查找设备”。向导完成后再进 9008 跑 flash --stage after-setup')

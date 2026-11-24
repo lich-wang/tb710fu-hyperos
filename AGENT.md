@@ -55,7 +55,7 @@
 
 1. **唯一数据分区永不写入、永不擦除**：`persist`、`modemst1`、`modemst2`、`fsg`、`fsc`、`devinfo`、`frp`、`keystore`、`ssd`、
    `secdata`、`uefivarstore`、`cdt`、`ddr`、`proinfo`、`lenovolock`。工具会拒绝，你也不要用任何办法去碰。
-2. **确认词由用户决定**：`flash`、`restore` 会打印写入计划并要求输入确认词（`flash`、`wipe`、`setup-done`、`restore`）。
+2. **确认词由用户决定**：`flash`、`restore` 会打印写入计划并要求输入确认词（`flash`、`wipe`、`setup-done`、`upgrade`、`restore`）。
    先把计划原样给用户看，用户在对话里明确同意后才输入；`wipe` 会清空平板数据，单独问；`setup-done` 只有用户确认开机向导已经完成才能输入。
    **不要用管道、`yes`、`expect`、环境变量等方式自动确认**。上一次的同意不覆盖下一次。
 3. **进 9008 由用户自己按键**：你无法替用户按。每次要读写平板之前，把按键步骤讲清楚，等用户回复"好了"再运行命令。
@@ -93,6 +93,7 @@
 | 10 | 用户在平板上过开机向导（不登录小米账号、不开查找设备） | | | 进入桌面 |
 | 11 | `flash --stage after-setup`（第二阶段） | ✔ | **是** | 读回一致；之后可以在设置里登录小米账号 |
 | 12 | `report` → 整理报告 → 用户同意后 `gh issue create` | | | issue 已创建，把链接给用户 |
+| 以后 | 新的小米版本 / 本项目新修复：重新构建到 `package`，再 `flash --stage upgrade --dry-run` → `flash --stage upgrade` | ✔ | **是** | 不清数据；只用于这台电脑两阶段刷好的平板。确认词 `upgrade` 由用户决定 |
 
 - 构建（3–7）不需要平板，一共要一两个小时，期间可以让用户把平板拔掉。
 - 用户只想先做一部分（例如只跑到 `check`）也可以：在那一步停下，同样走第 12 步报告。
@@ -100,11 +101,12 @@
 
 ---
 
-## 四、写入前（`flash`、`flash --stage after-setup`、`restore`）
+## 四、写入前（`flash`、`flash --stage after-setup`、`flash --stage upgrade`、`restore`）
 
 1. 先跑对应的 `--dry-run`，把打印的写入计划（每个目标分区，以及源文件、字节数、完整 sha256）原样给用户看，说明后果：
    - 第一阶段写当前槽的启动链（`boot`、`init_boot`、`dtbo`、`vendor_boot`、`vbmeta`、`vbmeta_system`）和 `super`，原厂 495 还写当前槽的 `abl`，确认 `wipe` 后清空用户数据；
    - 第二阶段写 `vbmeta_system` 和 `super`（换成带查找设备的版本），数据保留；
+   - 升级写 `vbmeta_system`、`super` 和启动链里有变化的镜像，数据保留；userdata 不能回滚，提醒用户先另外备份个人文件；
    - `restore` 用这台平板自己的备份写回当前槽的启动链（含 `recovery`、`abl`）和 `super`，userdata 不动。
 2. 用户在对话里明确说同意，再运行真正的命令；工具要确认词时，问用户输入什么，照用户说的输入。
 3. 写完工具会读回比对。全部一致才算成功；有任何不一致，见下一节。
