@@ -120,7 +120,10 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
     - mi_ext/product 合并进来，原因同上；
     - `build.prop`：`pagesize.max=4096`（联想内核是 4K 页），去掉 `lcd_density`，并入 mi_ext 的属性，`.DEV`（小米账号需要，`--no-finddevice` 时不加）、手写笔、skiagl；
     - 机型身份：联想 odm 会把机型报成 `TB710FU`（system 的属性顺序是 odm 优先），小米框架就找不到 `device_features/TB710FU.xml`。所以把 `ro.product.property_source_order` 改成 product 优先，并写入 yupei odm 的身份（Xiaomi / yupei / 25097RP43C）。联想 odm 的 `*_for_attestation` 不动，要和设备出厂写入的身份一致；
-    - 两个 NCM overlay 在 `work/overlay/` 下有就带上。
+    - 两个 NCM overlay 在 `work/overlay/` 下有就带上；
+    - **去掉系统自带更新 `app/Updater`（#49）**：它把平板当成小米平板 8（yupei），会下载 yupei 的官方 OTA（带 SM8750 的底层固件和 vendor），
+      在这台平板上要么校验失败，要么把不匹配的固件写进另一个槽。升级改走本项目。`system_ext/bin/miupdater`（只在
+      `persist.sys.cota.partition` 被设置时，往 `opcust` / `opconfig` / `md1img_a` 写运营商定制包）没去掉：这几个分区 TB710FU 上都没有。
   - 不再需要 `sepolicy_compat.cil`、移植包的 PearlBiometric 人脸，以及 lwky 的分辨率、窗口规则、智能充电、机型伪装。
   - OS4.0.5.0 实测（3 分 36 秒）：和小米原镜像逐项比对，system 只有 `build.prop` 内容变了、新增 10 个条目；product 只有 `etc/build.prop` 变了，删掉 pangu（24 个条目）、新增 mi_ext 的 139 个条目。所有共有路径的元数据都不变，新增条目都有指定的元数据。
   - 待真机：人脸解锁（yupei 声明的是 TEE 人脸，这里没有）、`device_features/yupei.xml` 里的 144Hz 等参数和这块屏是否相符。
