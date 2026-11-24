@@ -15,7 +15,7 @@ Files keep the uid/gid/mode/SELinux label of the official images; added files ta
 Output: work/build/framework/<version>[-nofind][-debug]/{system,system_ext,product}.img + framework.json.
 Needs erofs-utils (fsck.erofs, mkfs.erofs).
 """
-import glob, json, os, shutil, stat, subprocess, sys, tarfile, time, uuid
+import errno, glob, json, os, shutil, stat, subprocess, sys, tarfile, time, uuid
 
 from . import layout
 from .backup import file_sha256
@@ -78,9 +78,28 @@ def tool(name):
     return p
 
 
+def finder_file(name):
+    """macOS Finder / Spotlight metadata (.DS_Store, AppleDouble ._*) that can appear in an extracted tree on a Mac."""
+    return name == '.DS_Store' or name.startswith('._')
+
+
+def rmtree(path):
+    """shutil.rmtree that survives Finder dropping a .DS_Store into a directory while it is being removed."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            if e.errno != errno.ENOTEMPTY or attempt == 4:
+                raise
+            time.sleep(0.2)
+
+
 def extract(img, dest):
     if os.path.exists(dest):
-        shutil.rmtree(dest)
+        rmtree(dest)
     os.makedirs(dest)
     p = subprocess.run([tool('fsck.erofs'), f'--extract={dest}', img], capture_output=True, text=True)
     if p.returncode:
@@ -107,6 +126,7 @@ class Stage:
 
     def __init__(self, name, root, meta, version=''):
         self.name, self.root, self.meta, self.extra, self.defaulted = name, root, meta, {}, []
+        self.skipped = []                              # macOS metadata files left out of the image
         # fixed filesystem UUID: mkfs.erofs picks a random one, which makes every build of the same tree differ
         self.uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f'tb710fu:{version}:{name}'))
 
@@ -137,7 +157,13 @@ class Stage:
         for r, dirs, files in os.walk(self.root):
             dirs.sort()
             for x in dirs + sorted(files):
-                entries.append(os.path.relpath(os.path.join(r, x), self.root))
+                rel = os.path.relpath(os.path.join(r, x), self.root)
+                if finder_file(x) and rel not in self.meta and rel not in self.extra:
+                    self.skipped.append(rel)           # never part of an Android image; would get defaulted metadata
+                    if x in dirs:
+                        dirs.remove(x)
+                    continue
+                entries.append(rel)
         for rel in entries:
             full = os.path.join(self.root, rel)
             st = os.lstat(full)
@@ -157,7 +183,7 @@ class Stage:
                 with open(full, 'rb') as fh:
                     t.addfile(ti, fh)
         t.close()
-        shutil.rmtree(self.root)                       # the tar has everything now; keeps the peak disk use down
+        rmtree(self.root)                              # the tar has everything now; keeps the peak disk use down
         if os.path.exists(img):
             os.remove(img)
         p = subprocess.run([tool('mkfs.erofs'), '-b4096', '-zlz4hc,9', f'-T{MTIME}', f'-U{self.uuid}', '--tar=f', img, tpath],
@@ -271,6 +297,8 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
         for x in sorted(dirs) + sorted(files):
             src = os.path.join(r, x)
             rel = os.path.relpath(src, pg)
+            if finder_file(x) and 'pangu/system/' + rel not in meta['product']:
+                continue
             if '/com.tms.' in '/' + rel or rel.startswith('framework/oat') and 'com.tms.' in rel:
                 continue                       # Xiaomi NFC payment jars (no NFC here)
             dst_rel = 'system/' + rel
@@ -282,7 +310,7 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
                 shutil.copy2(src, os.path.join(S.root, dst_rel), follow_symlinks=False)
                 S.add(dst_rel, meta['product']['pangu/system/' + rel])
                 moved += 1
-    shutil.rmtree(os.path.join(P.root, 'pangu'))
+    rmtree(os.path.join(P.root, 'pangu'))
     changes['system'].append(f'product/pangu/system → system（{moved} 个文件，不含 com.tms.* NFC jar）')
 
     # product
@@ -292,6 +320,8 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
         for x in sorted(dirs) + sorted(files):
             src = os.path.join(r, x)
             rel = os.path.relpath(src, mp)
+            if finder_file(x) and 'product/' + rel not in meta['mi_ext']:
+                continue
             dst = os.path.join(P.root, rel)
             if os.path.isdir(src) and not os.path.islink(src):
                 os.makedirs(dst, exist_ok=True)
@@ -338,7 +368,9 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
         n = st.mkfs(os.path.join(out, f'{st.name}.img'))
         print(f'    {n} 个条目，{time.time() - t0:.0f} 秒；没有元数据、按父目录默认的 {len(st.defaulted)} 个', flush=True)
         res.setdefault('defaulted', {})[st.name] = st.defaulted[:50]
-    shutil.rmtree(M)
+        if st.skipped:
+            print(f'    没打包 {len(st.skipped)} 个 macOS 访达元数据文件（{", ".join(st.skipped[:3])}…）', flush=True)
+    rmtree(M)
     shutil.copyfile(img['system_ext'], os.path.join(out, 'system_ext.img'))
     for n in ('system', 'system_ext', 'product'):
         p = os.path.join(out, f'{n}.img')
