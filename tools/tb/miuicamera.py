@@ -14,8 +14,9 @@ obfuscated class names, and refused when an anchor is missing or ambiguous:
   2. MIVILutSaver.testPermission(): its write test into Xiaomi's persist layout always fails on the Lenovo persist
      (which must not be written) and shows "权限受限，请联系研发". The single call is replaced by "true".
 
-The APK is then rebuilt with apktool, zip-aligned and signed with the AOSP test key (tools/apksign/, see
-tools/THIRD_PARTY.md); its prebuilt oat/ (compiled against the original dex) is dropped by the caller.
+Only the dex files go through apktool (see build()); the APK is the original one entry by entry with the patched
+dex swapped in, zip-aligned and signed with the AOSP test key (tools/apksign/, see tools/THIRD_PARTY.md); its
+prebuilt oat/ (compiled against the original dex) is dropped by the caller.
 Needs Java, apktool, zipalign and apksigner (Android SDK build-tools).
 """
 import glob, os, re, shutil, subprocess, zipfile
@@ -26,8 +27,9 @@ ROLE_TAG = 'Camera2CompatAdapterRole'
 ROLE_ANCHOR = 'All available camera ids'
 LUT_CALL = 'Lcom/xiaomi/camera/mivi/filter/MIVILutSaver;->testPermission()Z'
 KEY_DIR = os.path.join(TOOLS, 'apksign')
-# The fixed role -> camera ids of TB710FU (verified on the device: CAM_START_DEV of each sensor).
-ROLES = ((1, 1), (0, 0))
+# The roles filled in. On TB710FU the role id equals the camera id (verified on the device: CAM_START_DEV of each
+# sensor), which the generated code relies on (it puts the same register as key and value).
+ROLES = (1, 0)
 MARK = '# tb710fu (#48)'
 
 
@@ -95,16 +97,15 @@ def patch_role_table(text):
     a, b = f'v{nloc}', f'v{nloc + 1}'
     ind = loc.group(1)
     code = [f'{ind}{MARK}: roles the Lenovo HAL does not publish', f'{ind}iget-object {a}, p0, {cls}->{field}:Landroid/util/SparseIntArray;']
-    for role, cam in ROLES:
+    for role in ROLES:
         done = f':tb710fu_role{role}'
         code += [f'{ind}const/4 {b}, {role:#x}',
                  f'{ind}invoke-virtual {{{a}, {b}}}, Landroid/util/SparseIntArray;->indexOfKey(I)I',
                  f'{ind}move-result {b}',
                  f'{ind}if-gez {b}, {done}',
-                 f'{ind}const/4 {b}, {role:#x}']
-        code += ([f'{ind}invoke-virtual {{{a}, {b}, {b}}}, Landroid/util/SparseIntArray;->put(II)V'] if role == cam else
-                 [f'{ind}const/4 {a}, {cam:#x}', f'{ind}invoke-virtual {{{a}, {b}, {a}}}, Landroid/util/SparseIntArray;->put(II)V'])
-        code += [f'{ind}{done}']
+                 f'{ind}const/4 {b}, {role:#x}',
+                 f'{ind}invoke-virtual {{{a}, {b}, {b}}}, Landroid/util/SparseIntArray;->put(II)V',
+                 f'{ind}{done}']
     body = body[:at] + '\n'.join(code) + '\n' + body[at:]
     body = body[:loc.start()] + f'{ind}.locals {nloc + 2}' + body[loc.end():]
     return text[:s] + body + text[e:]
@@ -163,13 +164,21 @@ def patch_tree(decoded):
 
 # ---------------------------------------------------------------- build
 
+_JAVA = []
+
+
 def find(name):
     """Path of java / apktool / zipalign / apksigner, or None (macOS's /usr/bin/java stub does not count)."""
     if name == 'java':
+        if _JAVA:
+            return _JAVA[0]
         home = os.environ.get('JAVA_HOME')
         cands = ([os.path.join(home, 'bin', 'java')] if home else []) + [shutil.which('java')] + \
             ['/opt/homebrew/opt/openjdk/bin/java', '/usr/local/opt/openjdk/bin/java']
-        return next((c for c in cands if c and os.access(c, os.X_OK) and _java_ok(c)), None)
+        found = next((c for c in cands if c and os.access(c, os.X_OK) and _java_ok(c)), None)
+        if found:
+            _JAVA.append(found)
+        return found
     return shutil.which(name) or _sdk_tool(name)
 
 
@@ -203,7 +212,9 @@ def _sdk_tool(name):
              os.path.expanduser('~/Library/Android/sdk'), os.path.expanduser('~/Android/Sdk'),
              '/opt/homebrew/share/android-commandlinetools', '/usr/local/share/android-commandlinetools']
     for r in filter(None, roots):
-        cands = sorted(glob.glob(os.path.join(r, 'build-tools', '*', name)))
+        # newest build-tools by version number (a text sort puts 9.0.0 after 36.0.0)
+        cands = sorted(glob.glob(os.path.join(r, 'build-tools', '*', name)),
+                       key=lambda c: tuple(int(x) for x in re.findall(r'\d+', os.path.basename(os.path.dirname(c)))))
         if cands:
             return cands[-1]
     return None
@@ -237,8 +248,9 @@ def build(apk, out_apk, work):
 
     Only the dex files go through apktool: an APK holds entries whose names differ only in case (Xiaomi's
     obfuscated res/-KN.xml and res/-kn.xml), which a case-insensitive file system (macOS) merges when the whole
-    APK is unpacked to disk. So the result is the original APK, entry by entry (same order, name, compression),
-    with only the patched dex replaced and the old signature files dropped; then zipalign and apksigner.
+    APK is unpacked to disk. So the result is the original APK, entry by entry (same order, name and compression
+    method; the deflate output is this host's zlib), with only the patched dex replaced and the old signature files
+    dropped; then zipalign and apksigner. The work directory is removed afterwards, also on failure.
     """
     t = tools()
     for n in ('testkey.pk8', 'testkey.x509.pem'):
@@ -246,6 +258,13 @@ def build(apk, out_apk, work):
             raise SourceError(f'缺 tools/apksign/{n}（仓库自带，重新检出）')
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
+    try:
+        return _build(t, apk, out_apk, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _build(t, apk, out_apk, work):
     with zipfile.ZipFile(apk) as z:
         names = z.namelist()
         if len(set(names)) != len(names):
@@ -280,7 +299,8 @@ def build(apk, out_apk, work):
     aligned = os.path.join(work, 'aligned.apk')
     run([t['zipalign'], '-f', '-p', '4', unsigned, aligned], 'zipalign')
     signed = os.path.join(work, 'signed.apk')
-    # v1-v3 signatures in the APK; no v4 .idsig side file (only incremental install uses it), so only the APK leaves work/
+    # apksigner picks the schemes for the APK's minSdk (v3 for this one, like the original); no v4 .idsig side file
+    # (only incremental install uses it), so only the APK leaves work/
     run([t['apksigner'], 'sign', '--v4-signing-enabled', 'false', '--key', os.path.join(KEY_DIR, 'testkey.pk8'),
          '--cert', os.path.join(KEY_DIR, 'testkey.x509.pem'), '--out', signed, aligned], 'apksigner 签名')
     run([t['apksigner'], 'verify', signed], 'apksigner 核对签名')
@@ -293,5 +313,18 @@ def build(apk, out_apk, work):
         if set(changed) != patched:
             raise SourceError(f'小米相机：内容变了的条目是 {changed}，应只有 {sorted(patched)}：不打补丁')
     shutil.copyfile(signed, out_apk)
-    shutil.rmtree(work, ignore_errors=True)
-    return {'role_table': role, 'lut_check': lut, 'dex': sorted(patched)}
+    return {'role_table': role, 'lut_check': lut, 'dex': sorted(patched), 'tools': versions(t)}
+
+
+def versions(t):
+    """Tool versions for framework.json (the rebuilt dex depends on apktool / smali)."""
+    out = {}
+    for n, args in (('apktool', ['--version']), ('apksigner', ['version']), ('java', ['-version'])):
+        try:
+            p = subprocess.run([t[n]] + args, capture_output=True, text=True, timeout=60, env=tool_env())
+            # the version line, not JVM warnings (java prints its version on stderr, the others on stdout)
+            lines = [l for l in (p.stderr if n == 'java' else p.stdout).splitlines() if re.search(r'\d+\.\d+|version', l)]
+            out[n] = lines[0].strip()[:80] if lines else '?'
+        except (OSError, subprocess.SubprocessError):
+            out[n] = '?'
+    return out

@@ -124,11 +124,16 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
     - **小米相机前摄（#48）**：小米相机只按小米的 vendor tag `com.xiaomi.cameraid.role.cameraIds` / `.cameraId` 建“角色 → 摄像头”表，
       联想 CamX 不发布这两个 tag（配置层也加不了），表里只有角色 -1，前摄（角色 1）解析成摄像头 -1，切前摄就“无法连接到相机”。
       HAL 本身正常：摄像头 0 = 后摄主摄 txd_ov13b10，1 = 前摄 lce_gc13a2（选前摄时内核有 `CAM_START_DEV Success for lce_gc13a2`）。
-      `framework` 用 apktool 解开官方 `priv-app/MiuiCamera/MiuiCamera.apk` 改两处（`tools/tb/miuicamera.py`，按日志字符串 / 未混淆的类名定位，
+      `framework` 把官方 `priv-app/MiuiCamera/MiuiCamera.apk` 的 dex 交给 apktool 改两处（`tools/tb/miuicamera.py`，按日志字符串 / 未混淆的类名定位，
       定位不到或不唯一就停下）：① 角色表建好时补上缺的“角色 1 → 摄像头 1”“角色 0 → 摄像头 0”（HAL 自己发布了就不动，访问器不改）；
       ② `MIVILutSaver.testPermission()` 往小米的 persist 目录写测试文件，联想 persist 结构不同必然失败并弹“权限受限，请联系研发”，
-      persist 又不能写，所以这一处当作通过。再重新打包、`zipalign`、用 AOSP 测试密钥（`tools/apksign/`）签名，去掉按原 dex 编译的 `oat/`。
-      MiuiCamera 没有 `sharedUserId`，重签后仍作为 priv-app 运行。思路来自旧移植包的 `tb710fu_camfix_v1` 模块（它改的是另一个版本的 APK，这里不带它）。
+      persist 又不能写，所以这一处当作通过。只有 dex 经过 apktool：小米的 APK 里有 119 对只差大小写的资源名（`res/-KN.xml` 和 `res/-kn.xml` 等），
+      在 macOS 不区分大小写的磁盘上整包解开会丢一半，相机一打开就崩（真机踩过）。所以结果是原 APK 逐条复制、只换打了补丁的 dex，
+      再 `zipalign`、用 AOSP 测试密钥（`tools/apksign/`）签名，并核对条目和原 APK 一样；去掉按原 dex 编译的 `oat/`。
+      MiuiCamera 没有 `sharedUserId`，重签后仍作为 priv-app 运行。真机（2026-11-24）：前摄正常；请求的 77 项权限里只有平台签名权限
+      `CONTROL_DEVICE_STATE` 没给（小米原来的签名也拿不到），小米自己的图库、安全中心、省电、媒体资产等权限都在。
+      代价：签名变了，应用商店推送的小米相机更新会因签名不符装不上——相机要随本项目的刷机包升级（#50）。
+      思路来自旧移植包的 `tb710fu_camfix_v1` 模块（它改的是另一个版本的 APK，这里不带它）。
   - 不再需要 `sepolicy_compat.cil`、移植包的 PearlBiometric 人脸，以及 lwky 的分辨率、窗口规则、智能充电、机型伪装。
   - OS4.0.5.0 实测（3 分 36 秒）：和小米原镜像逐项比对，system 只有 `build.prop` 内容变了、新增 10 个条目；product 只有 `etc/build.prop` 变了，删掉 pangu（24 个条目）、新增 mi_ext 的 139 个条目。所有共有路径的元数据都不变，新增条目都有指定的元数据。
   - 待真机：人脸解锁（yupei 声明的是 TEE 人脸，这里没有）、`device_features/yupei.xml` 里的 144Hz 等参数和这块屏是否相符。

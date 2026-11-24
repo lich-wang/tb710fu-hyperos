@@ -346,7 +346,7 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
 
     # images
     res = {'xiaomi': xiaomi_dir, 'version': info['version'], 'find_device': keep_finddevice, 'debug': debug,
-           'changes': changes, 'images': {}}
+           'changes': changes, 'miuicamera': where, 'images': {}}
     for st in (S, P):
         print(f'  打包 {st.name}（EROFS lz4hc）…', flush=True)
         t0 = time.time()
