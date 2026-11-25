@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 
 from . import layout
 from . import avb, backup as backup_mod, check
-from .flash import UNIQUE, confirm, file_sha256, overlaps, raw_vbmeta, short_serial
+from .flash import UNIQUE, confirm, file_sha256, forget_record, overlaps, raw_vbmeta, short_serial
 from .sources import WORK, SourceError
 
 TABLE = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stock_495.json')))
@@ -451,6 +451,7 @@ def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False, backup
     confirm('\n确认把平板恢复成联想官方原厂系统？', 'stock', assume_yes)
     confirm('\n这会清空平板上的安卓数据，删掉原厂以外的分区（ArmadaOS 等）。不同意就什么都不写。', 'wipe', assume_yes)
     safety = safety_copy(src, serial)
+    forget_record(serial)            # back to stock: the flash record no longer describes the tablet
     with tempfile.TemporaryDirectory(dir=WORK) as t:
         for g in p['gpt']:
             for blob, start, what in ((g['main'], 0, f'LUN{g["lun"]} 主分区表'),
