@@ -187,7 +187,8 @@ def cmd_flash(a):
     if not pkg:
         print('没有刷机包：先跑 tb710fu.py package', file=sys.stderr)
         return 1
-    return write_cmd(a, lambda src: flash.run(src, pkg, a.stage, a.backup, a.dry_run))
+    pkg = os.path.abspath(pkg)                      # edl runs elsewhere: a relative path would not be found
+    return write_cmd(a, lambda src: flash.run(src, pkg, a.stage, a.backup, a.dry_run, variant=a.variant))
 
 
 def cmd_restore(a):
@@ -269,6 +270,9 @@ def main():
                                 'upgrade：已刷好的平板换新版本 / 新修复，不清数据；'
                                 'system：装了 ArmadaOS Freedom 时只换安卓系统（super + 重签的 vbmeta_system，不碰启动链）')
             w.add_argument('--package', help='刷机包目录（默认 work/out 里最新的）')
+            w.add_argument('--variant', choices=('find', 'nofind'),
+                           help='只用于 --stage system：带 / 不带查找设备（默认按上次刷入的记录）。清过数据要重走开机向导时先用 '
+                                'nofind（带查找设备的 super 会让向导卡在查找设备一步），向导完成后再用 find')
         w.add_argument('--backup', help='设备完整备份（默认这台平板最新的一份）')
         w.add_argument('--loader', help='9008 firehose 加载器')
         w.add_argument('--dry-run', action='store_true', help='连上平板做完所有检查、打印计划，不写入（之后复位）')

@@ -531,11 +531,13 @@ def refuse_with_freedom(src, what):
             '只换安卓系统用 flash --stage system（只写 super 和 vbmeta_system）')
 
 
-def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
+def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False, variant=None):
     """Flash stage `first`, `after-setup`, `upgrade` or `system` of package directory pkg. Returns True when the
     tablet may reset."""
     if stage == 'system':
-        return run_system(src, pkg, backup_dir, dry_run, assume_yes)
+        return run_system(src, pkg, backup_dir, dry_run, assume_yes, variant)
+    if variant is not None:
+        raise SourceError('--variant 只用于 --stage system（其它阶段按阶段本身决定带不带查找设备）')
     refuse_with_freedom(src, f'flash --stage {stage} ')
     m = load_package(pkg)
     dev = m['device']
@@ -688,7 +690,7 @@ def resign_vbmeta_system(src_img, key_name, out):
     return new
 
 
-def run_system(src, pkg, backup_dir=None, dry_run=False, assume_yes=False):
+def run_system(src, pkg, backup_dir=None, dry_run=False, assume_yes=False, variant=None):
     """Stage system: Android next to ArmadaOS Freedom gets a new super + vbmeta_system; the boot chain stays."""
     m = load_package(pkg)
     dev = m['device']
@@ -707,7 +709,11 @@ def run_system(src, pkg, backup_dir=None, dry_run=False, assume_yes=False):
     if not rec or rec.get('stage') not in ('first', 'after-setup', 'upgrade', 'system'):
         raise SourceError('这台电脑上没有这台平板用本工具刷入的记录（work/flash/<序列号>.json），'
                           '不知道该用带还是不带查找设备的 super')
-    find = rec.get('find', rec['stage'] != 'first')
+    # Find Device or not: the record's choice, unless the caller names it. After a factory reset (the Freedom
+    # installer asks Android for one on its first boot) the setup wizard hangs in its Find Device step on a super
+    # with Find Device, so the wizard needs `nofind`; once it is done, `find` goes back on (like first / after-setup).
+    rec_variant = variant
+    find = rec.get('find', rec['stage'] != 'first') if variant is None else variant == 'find'
     variant = 'find' if find else 'nofind'
     new_v, old_v = m['inputs']['xiaomi'].get('version'), rec.get('version')
     if old_v and version_key(new_v) and version_key(old_v):
@@ -755,7 +761,10 @@ def run_system(src, pkg, backup_dir=None, dry_run=False, assume_yes=False):
                 ('super', file_desc(sup, m['files'][sup]))]
         print(f'\n==== 写入计划（system：装了 ArmadaOS Freedom，只换安卓系统；槽 {slot}，平板 {short_serial(serial)}）====\n'
               f'{plan_lines(rows)}')
-        print(f'  小米 {old_v or "（记录里没有版本）"} → {new_v}；{"带" if find else "不带"}查找设备（按上次刷入的记录）')
+        print(f'  小米 {old_v or "（记录里没有版本）"} → {new_v}；{"带" if find else "不带"}查找设备'
+              f'（{"按上次刷入的记录" if rec_variant is None else "--variant " + rec_variant}）')
+        if not find:
+            print('  不带查找设备：用于清过数据、要重新走开机向导时。向导完成后再用 --variant find 换回带查找设备的版本')
         print(f'不写：boot（kShimC 启动菜单）、vbmeta、recovery、abl、init_boot、dtbo、vendor_boot、{"、".join(found)}、'
               '另一个槽、GPT、唯一数据分区；安卓数据保留')
         if dry_run:
