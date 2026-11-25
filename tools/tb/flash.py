@@ -432,17 +432,22 @@ def recorded_package(pkg_id):
     return None
 
 
-def upgrade_plan(src, m, slot, rec):
+def upgrade_plan(src, pkg, m, slot, rec):
     """What `upgrade` writes: the Find Device super + vbmeta_system, and the boot chain images that differ.
+    Returns (plan, version on the tablet, baseline fingerprint).
 
     Only onto what this computer flashed: the record says after-setup / upgrade, and the tablet's vbmeta_system and
-    the start of super are exactly what that run wrote (or, after an interrupted upgrade, what it was writing).
+    the start of super are what that run wrote (record "fp"), or what an interrupted upgrade was writing
+    ("pending"). The baseline is the fingerprint the tablet actually matches; the caller stores it before the first
+    write, so a run that fails before writing anything still finds the tablet acceptable afterwards. An upgrade cut
+    between vbmeta_system and super leaves one part old and one new: that mix is accepted only for the very package
+    that was being written (its fingerprint is "pending"), which rewrites both.
     """
     if rec.get('stage') not in ('after-setup', 'upgrade'):
         raise SourceError('这台电脑上没有这台平板两阶段都刷完（after-setup）的记录：upgrade 只用于已经用本项目刷好的平板。'
                           '没刷过就按 flash --stage first / after-setup 刷')
-    old, accepted = rec.get('version'), [x for x in (rec.get('fp'), rec.get('pending')) if x]
-    if not accepted or not old:
+    old, base, pending = rec.get('version'), rec.get('fp'), rec.get('pending')
+    if not base or not old:
         # a record from before these fields: take them from the package it names
         pkg_id = rec.get('package', '')
         opkg = recorded_package(pkg_id)
@@ -459,9 +464,24 @@ def upgrade_plan(src, m, slot, rec):
                 raise SourceError('记录里没有平板现状的指纹，work/out 里也找不到记录所指的刷机包：核对不了平板上跑的是不是'
                                   '本项目刷的系统，不升级')
         old = old or known['version']
-        if not accepted:
-            accepted = [known['fp']]
-    if not any(device_matches(src, slot, fp) for fp in accepted):
+        base = base or known['fp']
+    fps = [fp for fp in (base, pending) if fp]
+    vs_now = src.read_range(f'vbmeta_system{slot}', 0, max(fp['vbmeta_system_bytes'] for fp in fps))
+    head_now = hashlib.sha256(src.read_range('super', 0, HEAD)).hexdigest()
+
+    def parts(fp):          # (vbmeta_system is this one's, start of super is this one's)
+        return (hashlib.sha256(vs_now[:fp['vbmeta_system_bytes']]).hexdigest() == fp['vbmeta_system'],
+                head_now == fp['super_head'])
+    whole = [fp for fp in fps if all(parts(fp))]
+    if whole:
+        matched = whole[0]
+    elif pending and all(a or b for a, b in zip(parts(base), parts(pending))):
+        if fingerprint_of(pkg, m, m['plan']['after_setup'], slot) != pending:
+            raise SourceError('上次升级写到一半中断了（vbmeta_system 和 super 开头一个是升级前的、一个是新的）：'
+                              '只能用当时那个刷机包重跑 flash --stage upgrade，把它写完')
+        matched = base      # the record keeps the same (base, pending) pair for the rerun
+        print('上次升级写到一半中断了：用同一个刷机包重跑，把它写完')
+    else:
         raise SourceError('平板上的 vbmeta_system / super 开头不是这台电脑上次刷的（之后用 restore、恢复原厂或别的工具刷过？）：'
                           '不升级。要装就按 flash --stage first 重刷')
     new = m['inputs']['xiaomi']['version']
@@ -494,7 +514,7 @@ def upgrade_plan(src, m, slot, rec):
             same.append(d)
     print(f'启动链：{"、".join(sorted(same)) or "无"}和平板上的一样，不写'
           + (f'；{"、".join(sorted(set(plan) - set(variant)))} 有变化，一起写' if set(plan) - set(variant) else ''))
-    return plan, old
+    return plan, old, matched
 
 
 def freedom_present(parts):
@@ -533,7 +553,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     find = stage != 'first'
     rec = read_record(dev['chip_serial'])
     if stage == 'upgrade':
-        plan, old_version = upgrade_plan(src, m, slot, rec)
+        plan, old_version, base_fp = upgrade_plan(src, pkg, m, slot, rec)
     else:
         plan = m['plan']['first' if stage == 'first' else 'after_setup']
     allowed = {f'{n}{slot}' for n in BOOT_CHAIN} | {'super'}
@@ -607,8 +627,11 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
         # or the new fingerprint), and the version only goes up from here, so the interrupted state cannot be
         # "upgraded" back to an older package.
         if stage == 'upgrade':
-            write_record(dev['chip_serial'], dict(rec, version=version if version_key(version) >= version_key(old_version)
-                                                  else old_version, pending=new_fp))
+            # fp = what the tablet matched just now (also a baseline recovered for an old record, or a finished but
+            # unrecorded pending one), so a run that stops before its first write leaves the tablet acceptable
+            write_record(dev['chip_serial'], dict(rec, fp=base_fp, pending=new_fp,
+                                                  version=version if version_key(version) >= version_key(old_version)
+                                                  else old_version))
         elif os.path.exists(state_path(dev['chip_serial'])):
             os.remove(state_path(dev['chip_serial']))
     with tempfile.TemporaryDirectory(dir=WORK) as t:
