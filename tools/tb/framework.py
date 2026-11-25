@@ -368,7 +368,7 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
     upd = os.path.join(P.root, 'app', 'Updater')
     if not os.path.isfile(os.path.join(upd, 'Updater.apk')):
         raise SourceError('product 里没有 app/Updater/Updater.apk：这个小米版本没核对过，系统更新的位置变了')
-    shutil.rmtree(upd)
+    rmtree(upd)
     changes['product'].append('去掉 app/Updater（系统自带更新：会下载小米平板 8 的整包，#49）')
     if not keep_finddevice:
         shutil.rmtree(os.path.join(P.root, 'priv-app', 'MIUIFindDeviceCN'), ignore_errors=True)
