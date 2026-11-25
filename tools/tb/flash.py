@@ -29,6 +29,10 @@ BOOT_CHAIN = ('boot', 'init_boot', 'dtbo', 'vendor_boot', 'vbmeta', 'vbmeta_syst
 RESTORE_CHAIN = BOOT_CHAIN + ('recovery', 'abl')
 # partitions the ArmadaOS Freedom installer adds to LUN0: their presence means the boot chain is no longer ours
 FREEDOM_PARTS = ('ARMADA_BOOT', 'ARMADA_ROOT', 'ARMADA_BACKUP')
+# vbmeta / vbmeta_system hold a bare AVB image, no footer: a shorter image written over a longer one leaves the old tail
+# behind it, and tools that later re-sign in place (the ArmadaOS Freedom installer) refuse to grow over non-zero bytes.
+# These are always written zero-padded to the whole partition.
+RAW_VBMETA = ('vbmeta', 'vbmeta_system')
 WIPE = {'metadata': None, 'userdata': 64 << 20}     # bytes zeroed from the start (None = the whole partition)
 CHUNK = 1 << 22
 
@@ -175,6 +179,29 @@ def precheck(src, serial_want, slot_want):
 
 # ---------------------------------------------------------------- writes
 
+def raw_vbmeta(name):
+    """True for vbmeta / vbmeta_system of either slot (or without a slot suffix)."""
+    return (name[:-2] if name.endswith(('_a', '_b')) else name) in RAW_VBMETA
+
+
+def write_length(src, name, nbytes):
+    """Bytes `write_file` really writes for an `nbytes` image of `name`: a short vbmeta / vbmeta_system fills the
+    partition. The checks before the first write (no_overlap) must use the same length."""
+    p = src.parts.get(name)
+    if raw_vbmeta(name) and p and p.get('bytes') and nbytes < p['bytes']:
+        return p['bytes']
+    return nbytes
+
+
+def zero_padded(path, nbytes, workdir):
+    """`path` followed by zeros up to `nbytes`, as a new file in `workdir`."""
+    out = os.path.join(workdir, 'padded-' + os.path.basename(path))
+    with open(path, 'rb') as f, open(out, 'wb') as o:
+        shutil.copyfileobj(f, o, CHUNK)
+        o.truncate(nbytes)
+    return out
+
+
 class Writer:
     """Writes files / zeros to GPT-located partitions and reads every write back."""
 
@@ -194,9 +221,16 @@ class Writer:
         want = file_sha256(path)
         if n != expect['bytes'] or want != expect['sha256']:
             raise SourceError(f'{path} 和核对时的记录不一致（核对之后被改过？）：没有写 {name}')
-        print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB）…', flush=True)
+        note = ''
+        full = write_length(self.src, name, n)
+        if full != n:                                   # the rest of the partition becomes zeros, not what was there
+            path, note = zero_padded(path, full, self.work), f'，补零到整个分区 {full} 字节'
+            n, want = full, file_sha256(path)
+        print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB{note}）…', flush=True)
         self._ws(p, path)
         self.verify(name, p, n, want)
+        if note:
+            os.remove(path)
 
     def zero(self, name):
         n = wipe_bytes(self.src, name)
@@ -371,7 +405,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
             nb = wipe_bytes(src, n)
             target(src, n, nb)
             wipes.append((n, nb))
-    no_overlap(src, [(d, m['files'][f]['bytes']) for d, f in plan.items()] + wipes)
+    no_overlap(src, [(d, write_length(src, d, m['files'][f]['bytes'])) for d, f in plan.items()] + wipes)
     print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {short_serial(dev.get("chip_serial"))}）====\n{plan_lines(rows)}')
     for n, nb in wipes:
         print(f'  {n:18} ← 清零前 {nb / 2**20:.0f} MiB（恢复出厂，平板上的用户数据全部丢失）')
@@ -567,7 +601,7 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
             raise SourceError(f'备份里没有 {part}')
         target(src, part, st['items'][f'{part}.bin']['bytes'])
         rows.append((part, f))
-    no_overlap(src, [(part, st['items'][f'{part}.bin']['bytes']) for part, _ in rows])
+    no_overlap(src, [(part, write_length(src, part, st['items'][f'{part}.bin']['bytes'])) for part, _ in rows])
     rb_dev, rb_bak = rollback_now(src, slot), rollback_of_backup(bdir, slot)
     low = {k: (rb_bak.get(k), v) for k, v in rb_dev.items() if rb_bak.get(k) is None or rb_bak[k] < v}
     if low:
