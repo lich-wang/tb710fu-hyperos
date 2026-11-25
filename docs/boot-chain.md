@@ -201,6 +201,35 @@ python3 tools/tb710fu.py restore                      # 出问题时：用这台
 - **测试情况**：用模拟的 edl（按这台平板真实的 GPT 和备份内容建的 LUN 镜像）测过：确认、预检拒绝的各种情况、写坏后读回发现、第一、二阶段、写回备份（含 19 GB 的 super）。**还没在真机上写过。**
 - **升级（`--stage upgrade`）的测试情况**：判断逻辑（记录、指纹、中断后重跑、版本和地区、abl、启动链比较）用假设备跑过 13 个场景；真机：参考平板 2026-11-24 从两阶段刷好的状态连续升级两次（同版本，带 #48 的修复），只写了 super + `vbmeta_system`，数据保留、开机正常。
 
+### 装了 ArmadaOS Freedom 之后升级澎湃 OS（flash --stage system，#60）
+
+[ArmadaOS Freedom](https://github.com/ArmadaOS-Freedom/armadaos-freedom) 的安装器可以把 Linux 装在澎湃 OS 旁边。装完以后，Android 的启动链（两个槽）已经不是本工具写的那份了：
+- `boot` 换成了 kShimC 启动菜单；
+- `vbmeta` 被重签：顶层公钥还是 testkey_rsa4096，但链到 `vbmeta_system` 和 `recovery` 的公钥都换成了 testkey_rsa4096；
+- `vbmeta_system`、`recovery` 用 testkey_rsa4096 重签；
+- LUN0 多了 `ARMADA_BOOT`、`ARMADA_ROOT`、`ARMADA_BACKUP`。
+
+这时 `flash` 的第一、第二阶段（以及以后的其它整链写法）会拒绝：写回本工具的 boot / vbmeta 会覆盖 kShimC 菜单，Freedom 就进不去了；写回 testkey_rsa2048 签的 `vbmeta_system`，和 vbmeta 链里的公钥对不上，安卓起不来。
+
+只换安卓系统用 `--stage system`：
+
+```bash
+python3 tools/tb710fu.py backup                          # 装了 Freedom 之后分区表变了，要先有一份和现在一致的完整备份
+python3 tools/tb710fu.py flash --stage system --dry-run
+python3 tools/tb710fu.py flash --stage system
+```
+
+- 只写当前槽的 `vbmeta_system` 和 `super`。`boot`、`vbmeta`、`recovery`、`abl`、`init_boot`、`dtbo`、`vendor_boot`、ARMADA 分区、另一个槽都不写，安卓数据保留。
+- `vbmeta_system`：取刷机包里的那份（按上次刷入的记录选带 / 不带查找设备），用平板 vbmeta 链里登记的那把测试密钥重签。描述符、回滚索引、flags 都保持刷机包里的；签完验签、核对内嵌公钥，再补零到整个分区。
+- 写之前额外检查：
+  - 平板分区表里有 Freedom 的分区；
+  - 刷机包 vbmeta 里的 hash / hashtree 描述符（vendor、odm、vendor_dlkm、system_dlkm、init_boot、dtbo、vendor_boot）和平板 vbmeta 里的完全相同，也就是联想组件没变。不同时拒绝：这种升级要连 vbmeta 一起换，装了 Freedom 时不支持；
+  - `vbmeta_system` 的回滚索引不低于平板现值；
+  - 本机有这台平板的刷入记录（`work/flash/<芯片序列号>.json`），记录里有版本时不降级。
+- 不要在澎湃 OS 里接受系统自带的更新：它会写另一个槽的启动链。
+- `restore`：只接受分区表和现在一致的备份，也就是装了 Freedom 之后做的那份，所以写回的是安装器的启动链，kShimC 菜单保留。`restore-stock` 会删掉 ARMADA 分区，回到联想原厂。
+- 测试情况：模拟的 edl，用参考平板真实的安装器 vbmeta / vbmeta_system 和真实刷机包。覆盖了：写入，重签结果和安装器对同一个包重签出的描述符逐字节相同；没装 Freedom 时拒绝；装了 Freedom 时第一、二阶段拒绝；联想描述符不同时拒绝；回滚索引低时拒绝；降级时拒绝；没有刷入记录时拒绝；按记录选不带查找设备；链公钥是 testkey_rsa2048 时用 2048 签；签名被篡改时验签不过。**还没在真机上写过。**
+
 ### 恢复联想官方原厂（restore-stock，#37）
 
 ```bash

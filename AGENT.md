@@ -93,7 +93,7 @@
 | 10 | 用户在平板上过开机向导（不登录小米账号、不开查找设备） | | | 进入桌面 |
 | 11 | `flash --stage after-setup`（第二阶段） | ✔ | **是** | 读回一致；之后可以在设置里登录小米账号 |
 | 12 | `report` → 整理报告 → 用户同意后 `gh issue create` | | | issue 已创建，把链接给用户 |
-| 以后 | 新的小米版本 / 本项目新修复：重新构建到 `package`，再 `flash --stage upgrade --dry-run` → `flash --stage upgrade` | ✔ | **是** | 不清数据；只用于这台电脑两阶段刷好的平板。确认词 `upgrade` 由用户决定 |
+| 以后 | 新的小米版本 / 本项目新修复：重新构建到 `package`，再 `flash --stage upgrade --dry-run` → `flash --stage upgrade` | ✔ | **是** | 不清数据；只用于这台电脑两阶段刷好的平板。确认词 `upgrade` 由用户决定。装了 ArmadaOS Freedom 时 `upgrade` 会拒绝，改用 `flash --stage system` |
 
 - 构建（3–7）不需要平板，一共要一两个小时，期间可以让用户把平板拔掉。
 - 用户只想先做一部分（例如只跑到 `check`）也可以：在那一步停下，同样走第 12 步报告。
@@ -107,6 +107,8 @@
    - 第一阶段写当前槽的启动链（`boot`、`init_boot`、`dtbo`、`vendor_boot`、`vbmeta`、`vbmeta_system`）和 `super`，原厂 495 还写当前槽的 `abl`，确认 `wipe` 后清空用户数据；
    - 第二阶段写 `vbmeta_system` 和 `super`（换成带查找设备的版本），数据保留；
    - 升级写 `vbmeta_system`、`super` 和启动链里有变化的镜像，数据保留；userdata 不能回滚，提醒用户先另外备份个人文件；
+   - 平板上装了 ArmadaOS Freedom 时（分区表有 `ARMADA_*`），第一、第二阶段会被拒绝；只能用 `flash --stage system`：
+     只写重签的 `vbmeta_system` 和 `super`，不碰 kShimC 启动菜单，数据保留（见 `docs/boot-chain.md`）；
    - `restore` 用这台平板自己的备份写回当前槽的启动链（含 `recovery`、`abl`）和 `super`，userdata 不动。
 2. 用户在对话里明确说同意，再运行真正的命令；工具要确认词时，问用户输入什么，照用户说的输入。
 3. 写完工具会读回比对。全部一致才算成功；有任何不一致，见下一节。
