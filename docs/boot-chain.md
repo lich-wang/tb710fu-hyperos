@@ -221,8 +221,23 @@ python3 tools/tb710fu.py flash --stage system --dry-run
 python3 tools/tb710fu.py flash --stage system
 ```
 
+**装完 Freedom 后安卓第一次开机会清数据**：Freedom 安装器在 misc 里留了"恢复出厂"（BCB `--wipe_data`），
+装完后第一次从 kShimC 菜单进安卓，先进 recovery 清掉数据，再回到菜单（安装器 #135）。之后安卓要重新走开机向导，
+而**带查找设备的 super 会让开机向导卡在查找设备一步**（`DefaultActivity$FindDeviceState`，黑屏、`device_provisioned=0`），
+所以这时要先用不带查找设备的版本过向导，完成后换回带查找设备的版本（和第一次刷机的两阶段一样）：
+
+```bash
+python3 tools/tb710fu.py flash --stage system --variant nofind   # 清过数据、要走开机向导时
+#   → 从菜单进安卓，走完开机向导（不登录小米账号、不开查找设备）
+python3 tools/tb710fu.py flash --stage system --variant find     # 向导完成后；之后才能登录小米账号
+```
+
+- 不带查找设备的版本里没有 `com.xiaomi.finddevice`，**登录小米账号会闪退**（账号要绑定查找设备的服务）；
+  这个 APK 带平台签名、加入共享 UID `android.uid.finddevice`，Android 不允许用 adb 装成普通应用（`INSTALL_PARSE_FAILED_BAD_SHARED_USER_ID`），只能换 super。
+- 不加 `--variant` 时按上次刷入的记录选；`--variant` 只用于 `--stage system`。
+
 - 只写当前槽的 `vbmeta_system` 和 `super`。`boot`、`vbmeta`、`recovery`、`abl`、`init_boot`、`dtbo`、`vendor_boot`、ARMADA 分区、另一个槽都不写，安卓数据保留。
-- `vbmeta_system`：取刷机包里的那份（按上次刷入的记录选带 / 不带查找设备），用平板 vbmeta 链里登记的那把测试密钥重签。描述符、回滚索引、flags 都保持刷机包里的；签完验签、核对内嵌公钥，再补零到整个分区。
+- `vbmeta_system`：取刷机包里的那份（带 / 不带查找设备按 `--variant`，没给就按上次刷入的记录），用平板 vbmeta 链里登记的那把测试密钥重签。描述符、回滚索引、flags 都保持刷机包里的；签完验签、核对内嵌公钥，再补零到整个分区。
 - 写之前额外检查：
   - 平板分区表里有 Freedom 的分区；
   - 刷机包 vbmeta 里的 hash / hashtree 描述符（vendor、odm、vendor_dlkm、system_dlkm、init_boot、dtbo、vendor_boot）和平板 vbmeta 里的完全相同，也就是联想组件没变。不同时拒绝：这种升级要连 vbmeta 一起换，装了 Freedom 时不支持；
@@ -230,7 +245,10 @@ python3 tools/tb710fu.py flash --stage system
   - 本机有这台平板的刷入记录（`work/flash/<芯片序列号>.json`），记录里有版本时不降级。
 - 不要在澎湃 OS 里接受系统自带的更新：它会写另一个槽的启动链。
 - `restore`：只接受分区表和现在一致的备份，也就是装了 Freedom 之后做的那份，所以写回的是安装器的启动链，kShimC 菜单保留。`restore-stock` 会删掉 ARMADA 分区，回到联想原厂。
-- 测试情况：模拟的 edl，用参考平板真实的安装器 vbmeta / vbmeta_system 和真实刷机包。覆盖了：写入，重签结果和安装器对同一个包重签出的描述符逐字节相同；没装 Freedom 时拒绝；装了 Freedom 时第一、二阶段拒绝；联想描述符不同时拒绝；回滚索引低时拒绝；降级时拒绝；没有刷入记录时拒绝；按记录选不带查找设备；链公钥是 testkey_rsa2048 时用 2048 签；签名被篡改时验签不过。**还没在真机上写过。**
+- 测试情况：模拟的 edl，用参考平板真实的安装器 vbmeta / vbmeta_system 和真实刷机包。覆盖了：写入，重签结果和安装器对同一个包重签出的描述符逐字节相同；没装 Freedom 时拒绝；装了 Freedom 时第一、二阶段拒绝；联想描述符不同时拒绝；回滚索引低时拒绝；降级时拒绝；没有刷入记录时拒绝；按记录选不带查找设备；链公钥是 testkey_rsa2048 时用 2048 签；签名被篡改时验签不过；`--variant` 覆盖记录、之后按新记录、非 system 阶段拒绝 `--variant`。
+- **真机（2026-11-25，参考平板，装着 Freedom 20261122）**：小米 OS4.0.5.0 → OS4.0.12.0。第一次写入带查找设备的版本后安卓卡在开机向导
+  （上面说的清数据 + 查找设备）；`--variant nofind` 过向导、进桌面，再 `--variant find` 换回，数据保留；每次只写 super + vbmeta_system，
+  读回一致，`verifiedbootstate=green`，kShimC 菜单和 Freedom 没动。
 
 ### 恢复联想官方原厂（restore-stock，#37）
 
