@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 
 from . import layout
 from . import avb, backup as backup_mod, check
-from .flash import UNIQUE, confirm, file_sha256, forget_record, overlaps, short_serial
+from .flash import UNIQUE, confirm, file_sha256, forget_record, overlaps, raw_vbmeta, short_serial
 from .sources import WORK, SourceError
 
 TABLE = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stock_495.json')))
@@ -244,6 +244,8 @@ def plan(src, img):
         n = (TABLE['files'][f]['bytes'] + SS - 1) // SS
         if not (part[0] <= start and start + n <= part[0] + part[1]):
             raise SourceError(f'{f} 写到 LUN{lun} 扇区 {start} 会超出 {label}')
+        if raw_vbmeta(label) and start == part[0]:
+            n = part[1]                         # written zero-padded to the whole partition (vbmeta_pad)
         rng = {'lun': lun, 'start': start, 'sectors': n}
         for u in UNIQUE:
             for lu, ents in gpts.items():
@@ -310,14 +312,25 @@ def safety_copy(src, serial):
     return d
 
 
-def write_at(src, lun, start, path, work, what):
+def vbmeta_pad(parts, lun, start, label):
+    """Whole size of `label` when it is vbmeta / vbmeta_system and the image starts at the partition's first sector
+    (see flash.RAW_VBMETA: the old tail must not stay behind a shorter image), else None."""
+    q = parts.get(label)
+    if raw_vbmeta(label) and q and q['lun'] == lun and q['start'] == start:
+        return q['bytes']
+    return None
+
+
+def write_at(src, lun, start, path, work, what, pad_to=None):
+    """pad_to: zero-pad the image up to this many bytes (vbmeta_pad), so nothing old stays after it."""
     n = os.path.getsize(path)
-    if n % SS:                                  # firehose writes whole sectors: pad with zeros
+    size = max((n + SS - 1) // SS * SS, pad_to or 0)     # firehose writes whole sectors: pad with zeros
+    if size != n:
         padded = os.path.join(work, 'pad.bin')
         with open(path, 'rb') as f, open(padded, 'wb') as o:
             shutil.copyfileobj(f, o, 1 << 22)
-            o.truncate((n + SS - 1) // SS * SS)
-        path, n = padded, os.path.getsize(padded)
+            o.truncate(size)
+        path, n = padded, size
     want = file_sha256(path)
     print(f'  写 {what}（LUN{lun} 扇区 {start}，{n / 2**20:.1f} MiB）…', flush=True)
     src.edl('ws', start, path, f'--lun={lun}')
@@ -455,8 +468,9 @@ def run(src, package=None, dry_run=False, assume_yes=False, slot_b=False, backup
                     raise SourceError(f'写完分区表后重新读出的 LUN{lun} 和算好的不一样：停在这里，平板留在 9008。'
                                       f'安全副本在 {safety}')
             print('  重新读出的分区表和算好的一致', flush=True)
+        now = parts if p['gpt'] else src.parts
         for lun, start, f, label in p['writes']:
-            write_at(src, lun, start, os.path.join(img, f), t, f'{label}（{f}）')
+            write_at(src, lun, start, os.path.join(img, f), t, f'{label}（{f}）', vbmeta_pad(now, lun, start, label))
     src.edl('setbootablestoragedrive', BOOT_LUN)
     write_record(serial, 'a')
     print(f'\n✅ 已恢复联想官方 {TABLE["version"]}，全部读回一致。安全副本：{safety}')
@@ -491,7 +505,7 @@ def run_slot_b(src, serial, img, p, dry_run, assume_yes):
     safety = safety_copy(src, serial)
     with tempfile.TemporaryDirectory(dir=WORK) as t:
         for lun, start, f, label in writes:
-            write_at(src, lun, start, os.path.join(img, f), t, f'{label}（{f}）')
+            write_at(src, lun, start, os.path.join(img, f), t, f'{label}（{f}）', vbmeta_pad(src.parts, lun, start, label))
     write_record(serial, 'b')
     print(f'\n✅ B 槽已恢复联想官方 {TABLE["version"]}，全部读回一致。安全副本：{safety}')
     return True

@@ -153,6 +153,9 @@ python3 tools/tb710fu.py package
   - `super_find.img` + `vbmeta_system_find.img`：向导完成后写入；
   - `manifest.json`。
 - **super**：用 `tools/make_super.py` 生成，大小取设备 GPT 里 super 的长度。只放当前槽的 7 个逻辑分区，另一个槽留空。只写到内容结束为止（约 10.7 GB，super 分区是 19 GB）。生成后读回，每个分区的字节都要和来源镜像一致。
+- **vbmeta / vbmeta_system 补零写入**：这两个分区只有一个裸 AVB 镜像（8 KiB 左右），分区是 64 KiB。`flash`、`restore-stock`
+  写它们时补零到整个分区，否则原来更长的 vbmeta（例如原厂 495 的 8512 字节）的尾部会留在新镜像后面；
+  ArmadaOS Freedom 安装器原地重签时不允许覆盖非零字节，会报 `AVB metadata growth would overwrite non-empty partition data`。
 - **一致性检查**：两份启动链除了 product 和 vbmeta_system，其余必须逐字节相同。为此构建是可重复的：hashtree 的 salt 由分区名和芯片序列号算出，EROFS 的 UUID 由版本和分区名算出，打包时间固定。
 - **manifest.json**：
   - 每个文件的 sha256；
