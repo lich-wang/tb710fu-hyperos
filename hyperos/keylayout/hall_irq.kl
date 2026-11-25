@@ -1,0 +1,5 @@
+# TB710FU magnetic cover (hall sensor, input device "hall_irq"), #54.
+# The driver reports the cover as key presses, not as SW_LID: scan code 252 when the cover closes, 253 when it opens
+# (getevent on the device). Android's lid handling only listens to SW_LID, so map them to sleep / wake instead.
+key 252   SLEEP
+key 253   WAKEUP

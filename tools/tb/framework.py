@@ -3,7 +3,7 @@
 Every change and its reason is listed in docs/porting.md ("框架侧"). In short:
   system      media.settings.xml commented out (the Lenovo vendor has no media_profiles_vendor.xml: zygote aborts);
               product/pangu/system and mi_ext's system permission file moved in (Xiaomi's vendor overlays them at
-              boot, the Lenovo vendor does not); Lenovo Tab Pen Plus key layout; tb710fu.rc (stylus, double tap
+              boot, the Lenovo vendor does not); Lenovo Tab Pen Plus and magnetic cover (hall_irq) key layouts; tb710fu.rc (stylus, double tap
               to wake and touch sampling switches wired to the Lenovo touch driver's /proc nodes)
   system_ext  unchanged (the image is copied)
   product     mi_ext/product merged in (same reason as pangu); build.prop: 4 KiB pages, no lcd_density,
@@ -27,7 +27,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from erofs_meta import Erofs  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-KEYLAYOUT = os.path.join(REPO, 'hyperos', 'keylayout', 'Vendor_17ef_Product_617f.kl')
+KEYLAYOUTS = ('Vendor_17ef_Product_617f.kl',   # Lenovo Tab Pen Plus
+              'hall_irq.kl')                   # magnetic cover: hall sensor keys -> sleep / wake (#54)
 OVERLAYS = ('TB710FUTetheringOverlay.apk', 'TB710FUConnectivityOverlay.apk')
 MTIME = 1230768000
 
@@ -277,10 +278,11 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
     # system
     edit_lines(os.path.join(sysroot, 'build.prop'), lambda ls: system_prop(ls, debug))
     changes['system'].append('build.prop: media.settings.xml 注释掉' + ('；调试版 adb' if debug else ''))
-    kl = 'system/usr/keylayout/Vendor_17ef_Product_617f.kl'
-    shutil.copyfile(KEYLAYOUT, os.path.join(S.root, kl))
-    S.add(kl, meta['system']['system/usr/keylayout/Generic.kl'], 0o100644)
-    changes['system'].append(kl)
+    for name in KEYLAYOUTS:
+        kl = 'system/usr/keylayout/' + name
+        shutil.copyfile(os.path.join(REPO, 'hyperos', 'keylayout', name), os.path.join(S.root, kl))
+        S.add(kl, meta['system']['system/usr/keylayout/Generic.kl'], 0o100644)
+        changes['system'].append(kl)
     rc = 'system/etc/init/tb710fu.rc'
     open(os.path.join(S.root, rc), 'w').write(TB710FU_RC)
     S.add(rc, meta['system']['system/etc/init/apexd.rc'], 0o100644)
