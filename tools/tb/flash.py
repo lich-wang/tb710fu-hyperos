@@ -6,6 +6,10 @@ Stages (manifest.json "plan"):
                When the package replaces the stock 495 ABL (manifest device.abl), also abl of the current slot: only
                the pinned CN 279 ABL (abl.py), only over the exact ABL check saw (or over itself on a re-run).
   after-setup  vbmeta_system + super with Find Device; data kept. Only allowed when the tablet is in stage first.
+  system       ArmadaOS Freedom is installed next to Android (its installer replaced boot with the kShimC menu and
+               re-signed vbmeta / vbmeta_system / recovery): only super + vbmeta_system of the current slot, the
+               latter re-signed with the key the tablet's vbmeta chains to it. Nothing of the boot chain is written,
+               so the menu, Freedom and its signatures stay. first / after-setup refuse while Freedom is installed.
 restore        boot chain of the current slot (with recovery and abl) + super from the device's own full backup.
 
 What is never done: writing the GPT, the other slot, firmware below the boot chain (abl only as above), or any
@@ -14,7 +18,7 @@ overlap a unique-data partition (persist, modemst1/2, fsg, fsc, devinfo, frp, ke
 uefivarstore, cdt, ddr, proinfo, lenovolock). Every write is read back; a mismatch stops at once and leaves the
 tablet in 9008 (no reset). The partition table is compared again after the writes.
 """
-import hashlib, json, os, shutil, tempfile, time
+import hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
 from . import abl as abl_mod, avb, backup as backup_mod, check, layout
 from .sources import WORK, SourceError
@@ -23,6 +27,8 @@ UNIQUE = ('persist', 'modemst1', 'modemst2', 'fsg', 'fsc', 'devinfo', 'frp', 'ke
           'uefivarstore', 'cdt', 'ddr', 'proinfo', 'lenovolock')
 BOOT_CHAIN = ('boot', 'init_boot', 'dtbo', 'vendor_boot', 'vbmeta', 'vbmeta_system')
 RESTORE_CHAIN = BOOT_CHAIN + ('recovery', 'abl')
+# partitions the ArmadaOS Freedom installer adds to LUN0: their presence means the boot chain is no longer ours
+FREEDOM_PARTS = ('ARMADA_BOOT', 'ARMADA_ROOT', 'ARMADA_BACKUP')
 # vbmeta / vbmeta_system hold a bare AVB image, no footer: a shorter image written over a longer one leaves the old tail
 # behind it, and tools that later re-sign in place (the ArmadaOS Freedom installer) refuse to grow over non-zero bytes.
 # These are always written zero-padded to the whole partition.
@@ -323,8 +329,26 @@ def short_serial(s):
     return f'{s[:3]}…{s[-3:]}' if s and len(s) > 6 else (s or '?')
 
 
+def freedom_present(parts):
+    """Names of the ArmadaOS Freedom partitions in the partition table (empty: not installed)."""
+    return [n for n in FREEDOM_PARTS if n in parts]
+
+
+def refuse_with_freedom(src, what):
+    found = freedom_present(src.parts)
+    if found:
+        raise SourceError(
+            f'平板上装了 ArmadaOS Freedom（分区表里有 {"、".join(found)}）。{what}会写回本工具的 boot / vbmeta：'
+            'kShimC 启动菜单会被覆盖，Freedom 就进不去了；它重签过的 vbmeta_system 也和本工具的对不上，安卓会起不来。'
+            '只换安卓系统用 flash --stage system（只写 super 和 vbmeta_system）')
+
+
 def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
-    """Flash stage `first` or `after-setup` of package directory pkg. Returns True when the tablet may reset."""
+    """Flash stage `first`, `after-setup` or `system` of package directory pkg. Returns True when the tablet may
+    reset."""
+    if stage == 'system':
+        return run_system(src, pkg, backup_dir, dry_run, assume_yes)
+    refuse_with_freedom(src, f'flash --stage {stage} ')
     m = load_package(pkg)
     dev = m['device']
     slot = dev['slot']
@@ -423,6 +447,141 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
     return True
 
 
+def version_key(v):
+    """'OS4.0.5.0.XPZCNXM' -> (4, 0, 5, 0); None when there are no numbers."""
+    m = re.match(r'\D*(\d+(?:\.\d+)*)', v or '')
+    return tuple(int(x) for x in m[1].split('.')) if m else None
+
+
+def read_record(serial):
+    try:
+        with open(state_path(serial)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def verify_signature(img):
+    """avbtool's own check that a bare vbmeta image is signed by the public key it embeds (verify_image would also
+    want every image its descriptors cover next to it)."""
+    from . import bootchain
+    code = ('import sys; sys.path.insert(0, sys.argv[1]); import avbtool\n'
+            'b = open(sys.argv[2], "rb").read(); h = avbtool.AvbVBMetaHeader(b[:256])\n'
+            'n = 256 + h.authentication_data_block_size + h.auxiliary_data_block_size\n'
+            'sys.exit(0 if h.algorithm_type and avbtool.verify_vbmeta_signature(h, b[:n]) else 1)')
+    p = subprocess.run([sys.executable, '-c', code, bootchain.AVB_DIR, img], capture_output=True, text=True)
+    if p.returncode:
+        raise SourceError(f'{img} 的签名验证不过：{(p.stdout + p.stderr).strip()[-300:]}')
+
+
+def resign_vbmeta_system(src_img, key_name, out):
+    """src_img re-signed with the AOSP test key `key_name`: same descriptors, rollback index and flags.
+    Returns the parsed result after avbtool has verified the signature with that key."""
+    from . import bootchain                 # avbtool + the repository's test keys
+    keys = {'testkey_rsa4096': (bootchain.K4096, 'SHA256_RSA4096'),
+            'testkey_rsa2048': (bootchain.K2048, 'SHA256_RSA2048')}
+    if key_name not in keys:
+        raise SourceError(f'平板 vbmeta 链到 vbmeta_system 的公钥是 {key_name or "非测试密钥"}，本工具签不了')
+    key, alg = keys[key_name]
+    with open(src_img, 'rb') as f:
+        old = avb.parse_vbmeta(avb.find_vbmeta(f.read()))
+    bootchain.avbtool('make_vbmeta_image', '--output', out, '--key', key, '--algorithm', alg,
+                      '--rollback_index', old['rollback'], '--flags', old['flags'],
+                      '--padding_size', bootchain.VBMETA_PAD, '--include_descriptors_from_image', src_img)
+    verify_signature(out)                   # the embedded key is checked to be `key_name` below
+    with open(out, 'rb') as f:
+        new = avb.parse_vbmeta(f.read())
+    with open(src_img, 'rb') as f, open(out, 'rb') as g:
+        same = avb.descriptor_blobs(avb.find_vbmeta(f.read())) == avb.descriptor_blobs(g.read())
+    if not same or new['rollback'] != old['rollback'] or new['flags'] != old['flags'] \
+            or (new['key'] or {}).get('name') != key_name:
+        raise SourceError('重签后的 vbmeta_system 和刷机包里的描述符 / 回滚索引 / flags 不一致：没有写')
+    return new
+
+
+def run_system(src, pkg, backup_dir=None, dry_run=False, assume_yes=False):
+    """Stage system: Android next to ArmadaOS Freedom gets a new super + vbmeta_system; the boot chain stays."""
+    m = load_package(pkg)
+    dev = m['device']
+    slot = dev['slot']
+    serial = dev.get('chip_serial')
+    precheck(src, serial, slot)
+    found = freedom_present(src.parts)
+    if not found:
+        raise SourceError('平板上没有 ArmadaOS Freedom 的分区：--stage system 只用于装了 Freedom 的平板。'
+                          '没装时升级用 flash --stage after-setup（或 upgrade）')
+    table = table_of(src.parts)
+    flags = {n: p.get('flags') for n, p in src.parts.items()}
+    bdir, _ = device_backup(serial, table, backup_dir)
+    print(f'备份：{bdir}（已核对）')
+    rec = read_record(serial)
+    if not rec or rec.get('stage') not in ('first', 'after-setup', 'upgrade', 'system'):
+        raise SourceError('这台电脑上没有这台平板用本工具刷入的记录（work/flash/<序列号>.json），'
+                          '不知道该用带还是不带查找设备的 super')
+    find = rec.get('find', rec['stage'] != 'first')
+    variant = 'find' if find else 'nofind'
+    new_v, old_v = m['inputs']['xiaomi'].get('version'), rec.get('version')
+    if old_v and version_key(new_v) and version_key(old_v) and version_key(new_v) < version_key(old_v):
+        raise SourceError(f'刷机包的小米版本 {new_v} 比平板上的 {old_v} 旧：不降级')
+
+    top_blob = check.partition_vbmeta(src, f'vbmeta{slot}')
+    if top_blob is None:
+        raise SourceError(f'读不到平板上的 vbmeta{slot}')
+    top = avb.parse_vbmeta(top_blob)
+    chain = [c for c in top['chains'] if c['partition'] == 'vbmeta_system']
+    if len(chain) != 1:
+        raise SourceError(f'平板 vbmeta{slot} 里没有（或不止一条）链到 vbmeta_system 的描述符')
+    chain = chain[0]
+    with open(os.path.join(pkg, 'vbmeta.img'), 'rb') as f:
+        pkg_top = f.read()
+    if avb.descriptor_blobs(pkg_top) != avb.descriptor_blobs(top_blob):
+        raise SourceError(f'刷机包 vbmeta 里 vendor、odm、vendor_dlkm、system_dlkm、init_boot、dtbo、vendor_boot 的描述符'
+                          f'和平板 vbmeta{slot} 里的不一样（联想组件变了）。这种升级要连 vbmeta 一起换，'
+                          '装了 Freedom 时不支持：没有写')
+    src_name = f'vbmeta_system_{variant}.img'
+    with open(os.path.join(pkg, src_name), 'rb') as f:
+        pkg_vs = avb.parse_vbmeta(avb.find_vbmeta(f.read()))
+    rb_dev = rollback_now(src, slot)
+    if pkg_vs['rollback'] < rb_dev.get(chain['rollback_location'], 0):
+        raise SourceError(f'刷机包 vbmeta_system 的回滚索引 {pkg_vs["rollback"]} 低于平板上的 '
+                          f'{rb_dev.get(chain["rollback_location"])}：会启动不了')
+
+    part_vs, sup = f'vbmeta_system{slot}', f'super_{variant}.img'
+    target(src, 'super', m['files'][sup]['bytes'])
+    with tempfile.TemporaryDirectory(dir=WORK) as t:
+        vs = os.path.join(t, f'vbmeta_system_{variant}-{(chain["key"] or {}).get("name") or "key"}.img')
+        resign_vbmeta_system(os.path.join(pkg, src_name), (chain['key'] or {}).get('name'), vs)
+        if os.path.getsize(vs) > src.parts[part_vs]['bytes']:
+            raise SourceError(f'重签后的 vbmeta_system 比 {part_vs} 分区还大')
+        with open(vs, 'r+b') as f:            # zeros to the end of the partition: no tail of an older vbmeta_system
+            f.truncate(src.parts[part_vs]['bytes'])
+        vs_info = {'bytes': os.path.getsize(vs), 'sha256': file_sha256(vs)}
+        target(src, part_vs, vs_info['bytes'])
+        no_overlap(src, [(part_vs, src.parts[part_vs]['bytes']), ('super', m['files'][sup]['bytes'])])
+        rows = [(part_vs, f'{src_name} 用 {chain["key"]["name"]} 重签、补零到整个分区（{vs_info["bytes"]} 字节，'
+                          f'sha256 {vs_info["sha256"]}）'),
+                ('super', file_desc(sup, m['files'][sup]))]
+        print(f'\n==== 写入计划（system：装了 ArmadaOS Freedom，只换安卓系统；槽 {slot}，平板 {short_serial(serial)}）====\n'
+              f'{plan_lines(rows)}')
+        print(f'  小米 {old_v or "（记录里没有版本）"} → {new_v}；{"带" if find else "不带"}查找设备（按上次刷入的记录）')
+        print(f'不写：boot（kShimC 启动菜单）、vbmeta、recovery、abl、init_boot、dtbo、vendor_boot、{"、".join(found)}、'
+              '另一个槽、GPT、唯一数据分区；安卓数据保留')
+        if dry_run:
+            print('\n--dry-run：检查都通过，什么都没写')
+            return False
+        check_space(m['files'][sup]['bytes'])
+        confirm('\n确认写入上面这些分区？', 'flash', assume_yes)
+        w = Writer(src, t)
+        w.write_file(part_vs, vs, vs_info)
+        w.write_file('super', os.path.join(pkg, sup), m['files'][sup])
+    same_table_after(src, table, flags)
+    with open(state_path(serial), 'w') as f:
+        json.dump({'stage': 'system', 'package': file_sha256(os.path.join(pkg, 'manifest.json')), 'find': find,
+                   'version': new_v, 'finished': time.strftime('%Y-%m-%dT%H:%M:%S%z')}, f)
+    print(f'\n✅ 安卓系统已换成 {new_v}，全部读回一致；kShimC 菜单和 Freedom 没动')
+    return True
+
+
 def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
     """Write the current slot's boot chain and super back from the device's own full backup."""
     serial = (src.sahara or {}).get('chip_serial')
@@ -450,6 +609,10 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
                           '平板在备份之后升级过系统？用当时版本的联想官方包恢复')
     shown = [(part, file_desc(f, st['items'][f'{part}.bin'])) for part, f in rows]
     print(f'\n==== 写回备份（{bdir}，槽 {slot}）====\n{plan_lines(shown)}')
+    if freedom_present(src.parts):
+        # the backup's table equals today's, so it was taken with Freedom installed: its boot chain is the
+        # installer's (kShimC menu, re-signed vbmeta) and writing it back keeps Freedom bootable
+        print('（平板上装了 ArmadaOS Freedom；这份备份是装了 Freedom 之后做的，写回的是安装器的启动链，kShimC 菜单保留）')
     print('不写：GPT、另一个槽、abl 以外的底层固件、唯一数据分区；userdata 不动（备份里本来就没有）')
     if dry_run:
         print('\n--dry-run：检查都通过，什么都没写')
