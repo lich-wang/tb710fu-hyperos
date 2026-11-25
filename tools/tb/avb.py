@@ -218,6 +218,29 @@ def parse_vbmeta(vb):
     return r
 
 
+def descriptor_blobs(vb, tags=(1, 2)):
+    """Sorted raw bytes of the descriptors with these tags (1 hashtree, 2 hash) of a vbmeta blob. ValueError if
+    malformed. Two images cover the same partitions with the same digests exactly when these lists are equal."""
+    if vb[:4] != b'AVB0' or len(vb) < 256:
+        raise ValueError('不是 vbmeta')
+    auth, aux = struct.unpack_from('>QQ', vb, 12)
+    d_off, d_size = struct.unpack_from('>QQ', vb, 96)
+    if d_off + d_size > aux:
+        raise ValueError('vbmeta 损坏（描述符超出辅助块）')
+    d = 256 + auth + d_off
+    end = d + d_size
+    _span(vb, d, d_size, '描述符')
+    out = []
+    while d + 16 <= end:
+        tag, nbf = struct.unpack_from('>QQ', vb, d)
+        if d + 16 + nbf > end:
+            raise ValueError('vbmeta 损坏（描述符越界）')
+        if tag in tags:
+            out.append(bytes(vb[d:d + 16 + nbf]))
+        d += 16 + nbf
+    return sorted(out)
+
+
 def key_blob(vb):
     """The embedded AVB public key blob of a vbmeta blob (b'' when unsigned). ValueError if malformed."""
     if vb[:4] != b'AVB0' or len(vb) < 256:

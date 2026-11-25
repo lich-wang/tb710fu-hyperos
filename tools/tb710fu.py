@@ -15,7 +15,7 @@
   tb710fu.py abl SOURCE                only for the stock ZUXOS 1.5.04.495 ABL: the CN 17.0.04.279 ABL that replaces it,
                                        from the official Lenovo CN 279 9008 package (or an abl image), checked
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
-  tb710fu.py flash [--stage first|after-setup]   9008: write the package (asks first; reads every write back)
+  tb710fu.py flash [--stage first|after-setup|system]   9008: write the package (asks first; reads every write back)
   tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
   tb710fu.py restore-stock             9008: back to Lenovo's stock ZUXOS 1.5.04.495 (also needs the tablet's full backup)
   tb710fu.py report                    text for the flash report issue (versions, ABL, package; read only)
@@ -264,8 +264,9 @@ def main():
                            ('restore', '9008 用这台平板自己的完整备份写回启动链和 super')):
         w = sub.add_parser(name, help=helptext)
         if name == 'flash':
-            w.add_argument('--stage', choices=('first', 'after-setup'), default='first',
-                           help='first：启动链 + 不带查找设备的 super + 清数据；after-setup：开机向导之后换带查找设备的 super')
+            w.add_argument('--stage', choices=('first', 'after-setup', 'system'), default='first',
+                           help='first：启动链 + 不带查找设备的 super + 清数据；after-setup：开机向导之后换带查找设备的 super；'
+                                'system：装了 ArmadaOS Freedom 时只换安卓系统（super + 重签的 vbmeta_system，不碰启动链）')
             w.add_argument('--package', help='刷机包目录（默认 work/out 里最新的）')
         w.add_argument('--backup', help='设备完整备份（默认这台平板最新的一份）')
         w.add_argument('--loader', help='9008 firehose 加载器')
