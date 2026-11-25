@@ -210,6 +210,19 @@ def load_profile(path):
 BACKUP_FILES = ('pvmfw', 'vbmeta_system', 'recovery')   # what the build takes from the device's backup
 
 
+def recovery_matches(d, prof):
+    """The backup's recovery of the profiled slot carries the key and rollback index check recorded. A backup made
+    after ArmadaOS Freedom was installed does not: its installer re-signs recovery with the AOSP test key."""
+    rec = (prof.get('vbmeta') or {}).get('recovery') or {}
+    try:
+        with open(os.path.join(d, f'recovery{prof["slot"]}.bin'), 'rb') as f:
+            vb = avb.find_vbmeta(f.read())
+        v = avb.parse_vbmeta(vb) if vb else None
+    except (OSError, ValueError):
+        return False
+    return bool(v) and v['key'] == rec.get('key') and v['rollback'] == rec.get('rollback')
+
+
 def device_backup(backup_mod, prof, backup_dir=None):
     """A complete backup of the profiled device (same chip serial) and slot; the latest one when not given.
     Of its files, the ones the build reads (BACKUP_FILES of the current slot) are checked against backup.json."""
@@ -250,8 +263,14 @@ def device_backup(backup_mod, prof, backup_dir=None):
         bad = backup_mod.verify_items(d, need_files)
         if bad:
             raise SourceError(f'{d} 里这些文件丢失或和记录不符：{", ".join(bad)}。重新备份。')
+        if not backup_dir and not recovery_matches(d, prof):
+            # e.g. the full backup flash needs after installing ArmadaOS Freedom: its recovery was re-signed, while
+            # the boot chain is built from what check saw; an older backup of that state is the right source
+            print(f'  跳过备份 {d}：里面的 recovery 和设备档案记录的不一样（装 ArmadaOS Freedom 后重签过？），找更早的', flush=True)
+            continue
         return d
-    raise SourceError(f'没有这台平板（芯片序列号 {serial}、当前槽 {prof["slot"]}）的完整备份：先跑 tb710fu.py backup')
+    raise SourceError(f'没有这台平板（芯片序列号 {serial}、当前槽 {prof["slot"]}）、recovery 和设备档案一致的完整备份：'
+                      '先跑 tb710fu.py backup（装了 ArmadaOS Freedom 的平板要用装之前的备份，或 --backup 指定）')
 
 
 def build(lenovo_dir=None, vendor_dir=None, framework_dir=None, backup_dir=None, profile=None, verity=True):

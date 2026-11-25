@@ -120,7 +120,9 @@ python3 tools/tb710fu.py bootchain              # 默认开 dm-verity（vbmeta f
 python3 tools/tb710fu.py bootchain --no-verity  # 备用：flags=1，关掉 dm-verity（作者平板之前用的启动链就是这样）
 ```
 
-输入：`pull`（联想原厂启动镜像）、`vendor`、`framework` 的输出，设备档案（`check`），以及设备的完整备份（`backup`）。输出在 `work/build/bootchain/<芯片序列号>-<小米版本>/`：
+输入：`pull`（联想原厂启动镜像）、`vendor`、`framework` 的输出，设备档案（`check`），以及设备的完整备份（`backup`）。
+没指定 `--backup` 时用最新的、recovery 和设备档案一致的那份：装了 ArmadaOS Freedom 之后做的备份里，recovery 已被安装器重签，
+会被跳过（它用于 `flash` 核对现在的分区表，启动链则按 `check` 时的设备状态构建）。输出在 `work/build/bootchain/<芯片序列号>-<小米版本>/`：
 
 | 镜像 | 怎么来的 |
 |---|---|
