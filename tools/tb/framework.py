@@ -9,16 +9,17 @@ Every change and its reason is listed in docs/porting.md ("框架侧"). In short
   product     mi_ext/product merged in (same reason as pangu); build.prop: 4 KiB pages, no lcd_density,
               Xiaomi Pad 8 identity taken from the yupei odm (the Lenovo odm would otherwise make the device
               "TB710FU" to the Xiaomi framework), stylus on, skiagl, incremental ".DEV" (Xiaomi account);
-              the two USB NCM overlays from work/overlay/ when present; the system updater (app/Updater) removed:
-              it would fetch Xiaomi Pad 8's own OTA, whose firmware is for another SoC (#49)
+              the two USB NCM overlays from work/overlay/ when present; Xiaomi Camera patched for the Lenovo camera
+              HAL (front camera role, persist check; tb/miuicamera.py, #48), its stale prebuilt oat/ dropped; the system
+              updater (app/Updater) removed: it would fetch Xiaomi Pad 8's own OTA, whose firmware is for another SoC (#49)
 Files keep the uid/gid/mode/SELinux label of the official images; added files take them from a named source.
 
 Output: work/build/framework/<version>[-nofind][-debug]/{system,system_ext,product}.img + framework.json.
-Needs erofs-utils (fsck.erofs, mkfs.erofs).
+Needs erofs-utils (fsck.erofs, mkfs.erofs), and for the camera fix Java, apktool, zipalign and apksigner.
 """
 import glob, json, os, shutil, stat, subprocess, sys, tarfile, time, uuid
 
-from . import layout
+from . import layout, miuicamera
 from .backup import file_sha256
 from .sources import WORK, SourceError
 
@@ -318,6 +319,20 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
             changes['product'].append('overlay/' + ov)
         else:
             print(f'  ⚠ 没有 work/overlay/{ov}：USB 网络共享（NCM）在 Mac 上可能用不了（见 hyperos/README.md）')
+    cam_dir = os.path.join(P.root, 'priv-app', 'MiuiCamera')
+    cam = os.path.join(cam_dir, 'MiuiCamera.apk')
+    if not os.path.isfile(cam):
+        raise SourceError('product 里没有 priv-app/MiuiCamera/MiuiCamera.apk：这个小米版本没核对过')
+    print('  小米相机前摄修复（apktool 解包 → 补角色表、去 persist 自检 → 重新打包签名）…', flush=True)
+    patched = cam + '.tb710fu'
+    where = miuicamera.build(cam, patched, os.path.join(out, 'miuicamera'))
+    os.replace(patched, cam)                      # same path: keeps the official uid/gid/mode/SELinux label
+    shutil.rmtree(os.path.join(cam_dir, 'oat'), ignore_errors=True)
+    left = sorted(set(os.listdir(cam_dir)) - {'MiuiCamera.apk'})
+    if left:
+        raise SourceError(f'priv-app/MiuiCamera 里多出 {left}：打补丁不该留下别的文件')
+    changes['product'].append(f'priv-app/MiuiCamera：前摄角色表（{where["role_table"]}）、persist 自检'
+                              f'（{where["lut_check"]}），测试密钥重签，去掉旧的 oat/')
     # The system updater downloads and installs Xiaomi Pad 8 (yupei) OTAs: SM8750 firmware and vendor, never meant
     # for this tablet. Upgrades go through this project (flash --stage upgrade) instead (#49).
     upd = os.path.join(P.root, 'app', 'Updater')
@@ -339,7 +354,7 @@ def build(xiaomi_dir=None, keep_finddevice=True, debug=False):
 
     # images
     res = {'xiaomi': xiaomi_dir, 'version': info['version'], 'find_device': keep_finddevice, 'debug': debug,
-           'changes': changes, 'images': {}}
+           'changes': changes, 'miuicamera': where, 'images': {}}
     for st in (S, P):
         print(f'  打包 {st.name}（EROFS lz4hc）…', flush=True)
         t0 = time.time()

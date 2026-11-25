@@ -105,6 +105,8 @@
 1. 先跑对应的 `--dry-run`，把打印的写入计划（每个目标分区，以及源文件、字节数、完整 sha256）原样给用户看，说明后果：
    - 第一阶段写当前槽的启动链（`boot`、`init_boot`、`dtbo`、`vendor_boot`、`vbmeta`、`vbmeta_system`）和 `super`，原厂 495 还写当前槽的 `abl`，确认 `wipe` 后清空用户数据；
    - 第二阶段写 `vbmeta_system` 和 `super`（换成带查找设备的版本），数据保留；
+   - 平板上装了 ArmadaOS Freedom 时（分区表有 `ARMADA_*`），第一、第二阶段会被拒绝；只能用 `flash --stage system`：
+     只写重签的 `vbmeta_system` 和 `super`，不碰 kShimC 启动菜单，数据保留（见 `docs/boot-chain.md`）；
    - `restore` 用这台平板自己的备份写回当前槽的启动链（含 `recovery`、`abl`）和 `super`，userdata 不动。
 2. 用户在对话里明确说同意，再运行真正的命令；工具要确认词时，问用户输入什么，照用户说的输入。
 3. 写完工具会读回比对。全部一致才算成功；有任何不一致，见下一节。

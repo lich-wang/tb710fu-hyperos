@@ -121,6 +121,19 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
     - `build.prop`：`pagesize.max=4096`（联想内核是 4K 页），去掉 `lcd_density`，并入 mi_ext 的属性，`.DEV`（小米账号需要，`--no-finddevice` 时不加）、手写笔、skiagl；
     - 机型身份：联想 odm 会把机型报成 `TB710FU`（system 的属性顺序是 odm 优先），小米框架就找不到 `device_features/TB710FU.xml`。所以把 `ro.product.property_source_order` 改成 product 优先，并写入 yupei odm 的身份（Xiaomi / yupei / 25097RP43C）。联想 odm 的 `*_for_attestation` 不动，要和设备出厂写入的身份一致；
     - 两个 NCM overlay 在 `work/overlay/` 下有就带上；
+    - **小米相机前摄（#48）**：小米相机只按小米的 vendor tag `com.xiaomi.cameraid.role.cameraIds` / `.cameraId` 建“角色 → 摄像头”表，
+      联想 CamX 不发布这两个 tag（配置层也加不了），表里只有角色 -1，前摄（角色 1）解析成摄像头 -1，切前摄就“无法连接到相机”。
+      HAL 本身正常：摄像头 0 = 后摄主摄 txd_ov13b10，1 = 前摄 lce_gc13a2（选前摄时内核有 `CAM_START_DEV Success for lce_gc13a2`）。
+      `framework` 把官方 `priv-app/MiuiCamera/MiuiCamera.apk` 的 dex 交给 apktool 改两处（`tools/tb/miuicamera.py`，按日志字符串 / 未混淆的类名定位，
+      定位不到或不唯一就停下）：① 角色表建好时补上缺的“角色 1 → 摄像头 1”“角色 0 → 摄像头 0”（HAL 自己发布了就不动，访问器不改）；
+      ② `MIVILutSaver.testPermission()` 往小米的 persist 目录写测试文件，联想 persist 结构不同必然失败并弹“权限受限，请联系研发”，
+      persist 又不能写，所以这一处当作通过。只有 dex 经过 apktool：小米的 APK 里有 119 对只差大小写的资源名（`res/-KN.xml` 和 `res/-kn.xml` 等），
+      在 macOS 不区分大小写的磁盘上整包解开会丢一半，相机一打开就崩（真机踩过）。所以结果是原 APK 逐条复制、只换打了补丁的 dex，
+      再 `zipalign`、用 AOSP 测试密钥（`tools/apksign/`）签名，并核对条目和原 APK 一样；去掉按原 dex 编译的 `oat/`。
+      MiuiCamera 没有 `sharedUserId`，重签后仍作为 priv-app 运行。真机（2026-11-24）：前摄正常；请求的 77 项权限里只有平台签名权限
+      `CONTROL_DEVICE_STATE` 没给（小米原来的签名也拿不到），小米自己的图库、安全中心、省电、媒体资产等权限都在。
+      代价：签名变了，应用商店推送的小米相机更新会因签名不符装不上——相机要随本项目的刷机包升级（#50）。
+      思路来自旧移植包的 `tb710fu_camfix_v1` 模块（它改的是另一个版本的 APK，这里不带它）。
     - **去掉系统自带更新 `app/Updater`（#49）**：它把平板当成小米平板 8（yupei），会下载 yupei 的官方 OTA（带 SM8750 的底层固件和 vendor），
       在这台平板上要么校验失败，要么把不匹配的固件写进另一个槽。升级改走本项目。`system_ext/bin/miupdater`（只在
       `persist.sys.cota.partition` 被设置时，往 `opcust` / `opconfig` / `md1img_a` 写运营商定制包）没去掉：这几个分区 TB710FU 上都没有。
