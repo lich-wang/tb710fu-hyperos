@@ -6,10 +6,13 @@ and resets it. Nothing is written to the tablet.
 """
 import glob, hashlib, os, platform, re, shutil, subprocess, sys, time
 
-from . import sources
+from . import miuicamera, sources
 from .sources import TOOLS, WORK, SourceError
 
 AVB_DIR, MKB_DIR = os.path.join(TOOLS, 'avb'), os.path.join(TOOLS, 'mkbootimg')
+# the AOSP app test key (tools/THIRD_PARTY.md)
+APKSIGN_SHA256 = {'testkey.pk8': '495675d32e89a149d5abe191f4e9c0e218b9068714e9b53a7c91e164a0741a23',
+                  'testkey.x509.pem': 'a4384ba815b9499a5ce349b4e33c1755278873fe2eac150a068823f526e6dbde'}
 TESTKEY_SHA1 = {'testkey_rsa4096.pem': '2597c218aae470a130f61162feaae70afd97f011',
                 'testkey_rsa2048.pem': 'cdbb77177f731920bbe0a0f94f84d9038ae0617d'}
 MIN_FREE = 150 << 30
@@ -112,6 +115,23 @@ def check_computer(r):
         r.ok('adb（可选：已 root 时 adb reboot edl、刷完后取日志）')
     else:
         r.note('没有 adb（可选，刷完后取日志要用）', install_hint('android-platform-tools', 'adb'))
+    check_camera_tools(r)
+
+
+def check_camera_tools(r):
+    """framework patches Xiaomi Camera (front camera on the Lenovo HAL, #48): Java, apktool, zipalign, apksigner."""
+    hints = {
+        'java': install_hint('openjdk', 'default-jre-headless'),
+        'apktool': install_hint('apktool', 'apktool'),
+        'zipalign': 'Debian / Ubuntu: sudo apt install zipalign；macOS: Android SDK build-tools（见 docs/testing.md）',
+        'apksigner': 'Debian / Ubuntu: sudo apt install apksigner；macOS: Android SDK build-tools（见 docs/testing.md）',
+    }
+    for n in ('java', 'apktool', 'zipalign', 'apksigner'):
+        p = miuicamera.find(n)
+        if p:
+            r.ok(f'{n}（{p}，小米相机前摄修复）')
+        else:
+            r.fail(f'没有 {n}（framework 给小米相机打前摄补丁要用）', hints[n])
 
 
 def check_aosp(r):
@@ -136,6 +156,14 @@ def check_aosp(r):
             r.ok(f'{key}（就是 AOSP 测试密钥）')
         else:
             r.fail(f'{key} 不是 AOSP 的测试密钥（公钥 sha1 {got}）', '仓库自带，重新检出仓库（git checkout -- tools/avb）')
+    for n, want in APKSIGN_SHA256.items():
+        p = os.path.join(TOOLS, 'apksign', n)
+        if not os.path.isfile(p):
+            r.fail(f'tools/apksign/{n} 没有', '仓库自带，重新检出仓库（git checkout -- tools/apksign）')
+        elif hashlib.sha256(open(p, 'rb').read()).hexdigest() != want:
+            r.fail(f'tools/apksign/{n} 和 THIRD_PARTY.md 记录的 sha256 不一样', '仓库自带，重新检出仓库（git checkout -- tools/apksign）')
+        else:
+            r.ok(f'tools/apksign/{n}（小米相机重签用的 AOSP 测试密钥）')
     for n in ('mkbootimg.py', 'unpack_bootimg.py'):
         if os.path.isfile(os.path.join(MKB_DIR, n)):
             r.ok(f'tools/mkbootimg/{n}')

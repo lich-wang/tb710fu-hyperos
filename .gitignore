@@ -22,5 +22,6 @@ __pycache__/
 *.pyc
 !/tools/avb/testkey_rsa4096.pem
 !/tools/avb/testkey_rsa2048.pem
+!/tools/apksign/testkey.x509.pem
 edl_config.json
 /tools/venv/
