@@ -1,0 +1,366 @@
+"""Xiaomi Camera (MiuiCamera.apk) front camera fix for the Lenovo camera HAL (#48).
+
+Xiaomi Camera finds its cameras through a role table (role id -> camera id) that it fills only from Xiaomi's vendor
+tags com.xiaomi.cameraid.role.cameraIds / .cameraId. The Lenovo CamX HAL does not publish them, so every camera gets
+role -1, the front role (1) resolves to camera -1 and the front camera never opens ("无法连接到相机"). The HAL itself
+is fine: camera 0 is the main back camera (txd_ov13b10) and camera 1 the front one (lce_gc13a2).
+
+Two edits to the official APK, both located by stable anchors (log strings, unobfuscated class names), never by the
+obfuscated class names, and refused when an anchor is missing or ambiguous:
+
+  1. role table: where the role adapter fills its SparseIntArray table (the method that logs "All available camera
+     ids"), add, just before the synchronized block ends, "role 1 -> camera 1" and "role 0 -> camera 0" when those
+     roles are missing. A HAL that does publish the tags keeps its own values; the accessors stay unchanged.
+  2. MIVILutSaver.testPermission(): its write test into Xiaomi's persist layout always fails on the Lenovo persist
+     (which must not be written) and shows "权限受限，请联系研发". The single call is replaced by "true".
+
+Only the dex files go through apktool (see build()); the APK is the original one entry by entry with the patched
+dex swapped in, zip-aligned and signed with the AOSP test key (tools/apksign/, see tools/THIRD_PARTY.md); its
+prebuilt oat/ (compiled against the original dex) is dropped by the caller.
+Needs Java, apktool, zipalign and apksigner (Android SDK build-tools).
+"""
+import glob, os, re, shutil, subprocess, zipfile, zlib
+
+from .sources import TOOLS, SourceError
+
+ROLE_TAG = 'Camera2CompatAdapterRole'
+ROLE_ANCHOR = 'All available camera ids'
+LUT_CALL = 'Lcom/xiaomi/camera/mivi/filter/MIVILutSaver;->testPermission()Z'
+KEY_DIR = os.path.join(TOOLS, 'apksign')
+# The roles filled in. On TB710FU the role id equals the camera id (verified on the device: CAM_START_DEV of each
+# sensor), which the generated code relies on (it puts the same register as key and value).
+ROLES = (1, 0)
+MARK = '# tb710fu (#48)'
+
+
+def _methods(text):
+    """(start, end) character spans of every .method ... .end method block."""
+    return [(m.start(), m.end()) for m in re.finditer(r'^\.method .*?^\.end method$', text, re.M | re.S)]
+
+
+def patch_role_table(text):
+    """Return the role adapter smali with the missing roles filled in, or None when this file is not the adapter.
+
+    >>> src = '''.class public final Lr6/e;
+    ... .field public volatile h:Landroid/util/SparseIntArray;
+    ... .method public final a(Z)V
+    ...     .locals 12
+    ...     const-string v0, "Camera2CompatAdapterRole"
+    ...     const-string v0, "All available camera ids: "
+    ...     monitor-enter p0
+    ...     iput-object v0, p0, Lr6/e;->h:Landroid/util/SparseIntArray;
+    ...     :cond_8
+    ...     monitor-exit p0
+    ...     return-void
+    ... .end method'''
+    >>> out = patch_role_table(src)
+    >>> '.locals 14' in out and 'indexOfKey' in out and out.index('indexOfKey') < out.index('monitor-exit p0')
+    True
+    >>> patch_role_table(out) == out       # already patched: unchanged
+    True
+    >>> patch_role_table('.class public final La;') is None
+    True
+    """
+    if ROLE_TAG not in text or ROLE_ANCHOR not in text:
+        return None
+    if MARK in text:
+        return text
+    cls = re.search(r'^\.class .*?(L[^;\s]+;)\s*$', text, re.M).group(1)
+    hits = []
+    for s, e in _methods(text):
+        body = text[s:e]
+        if ROLE_ANCHOR not in body:
+            continue
+        puts = list(re.finditer(r'^\s*iput-object v\d+, p0, %s->(\w+):Landroid/util/SparseIntArray;\s*$'
+                                % re.escape(cls), body, re.M))
+        if not puts:
+            continue
+        if len({m.group(1) for m in puts}) != 1:
+            raise SourceError('小米相机：角色表方法里给多个 SparseIntArray 字段赋值（'
+                              + '、'.join(sorted({m.group(1) for m in puts})) + '），认不出哪个是角色表：不打补丁')
+        put = puts[-1]
+        ex = re.search(r'^(\s*)monitor-exit p0\s*$', body[put.end():], re.M)
+        if not ex:
+            continue
+        hits.append((s, e, put.group(1), put.end() + ex.start()))
+    if len(hits) != 1:
+        raise SourceError(f'小米相机：找到 {len(hits)} 处角色表构建位置（应为 1）：这个版本没核对过，不打补丁')
+    s, e, field, at = hits[0]
+    body = text[s:e]
+    loc = re.search(r'^(\s*)\.locals (\d+)\s*$', body, re.M)
+    nloc = int(loc.group(2))
+    params = _param_registers(body.split('\n', 1)[0])
+    # two fresh registers above every existing local; 4-bit operands (35c invoke, 22c iget) need them below 16,
+    # and the parameter registers move up by two with them
+    if nloc + 2 + params > 16:
+        raise SourceError(f'小米相机：角色表方法的寄存器太多（locals {nloc} + 参数 {params}），这个版本没核对过')
+    a, b = f'v{nloc}', f'v{nloc + 1}'
+    ind = loc.group(1)
+    code = [f'{ind}{MARK}: roles the Lenovo HAL does not publish', f'{ind}iget-object {a}, p0, {cls}->{field}:Landroid/util/SparseIntArray;']
+    for role in ROLES:
+        done = f':tb710fu_role{role}'
+        code += [f'{ind}const/4 {b}, {role:#x}',
+                 f'{ind}invoke-virtual {{{a}, {b}}}, Landroid/util/SparseIntArray;->indexOfKey(I)I',
+                 f'{ind}move-result {b}',
+                 f'{ind}if-gez {b}, {done}',
+                 f'{ind}const/4 {b}, {role:#x}',
+                 f'{ind}invoke-virtual {{{a}, {b}, {b}}}, Landroid/util/SparseIntArray;->put(II)V',
+                 f'{ind}{done}']
+    body = body[:at] + '\n'.join(code) + '\n' + body[at:]
+    body = body[:loc.start()] + f'{ind}.locals {nloc + 2}' + body[loc.end():]
+    return text[:s] + body + text[e:]
+
+
+def _param_registers(decl):
+    """Registers taken by the parameters of a .method line (p0 included for non-static methods)."""
+    sig = re.search(r'\((.*?)\)', decl).group(1)
+    n = 0 if ' static ' in f' {decl} ' else 1
+    for t in re.findall(r'\[*(?:L[^;]+;|[ZBSCIJFD])', sig):
+        n += 2 if t in ('J', 'D') else 1
+    return n
+
+
+def patch_lut_check(text):
+    """Replace the MIVILutSaver.testPermission() call and its move-result with "true"; None when absent.
+
+    >>> src = '''    invoke-static {}, Lcom/xiaomi/camera/mivi/filter/MIVILutSaver;->testPermission()Z
+    ...
+    ...     move-result p0
+    ...
+    ...     if-nez p0, :cond_1'''
+    >>> out = patch_lut_check(src)
+    >>> 'testPermission' in out, 'const/16 p0, 0x1' in out
+    (False, True)
+    """
+    if LUT_CALL not in text:
+        return None
+    pat = re.compile(r'^(\s*)invoke-static \{\}, %s\s*\n(?:\s*\n)*\s*move-result ([vp]\d+)\s*$' % re.escape(LUT_CALL), re.M)
+    hits = pat.findall(text)
+    if len(hits) != 1 or text.count(LUT_CALL) != 1:
+        raise SourceError(f'小米相机：MIVILutSaver.testPermission() 调用有 {text.count(LUT_CALL)} 处（应为 1）：不打补丁')
+    ind, reg = hits[0]
+    # const/16 has an 8-bit register field, so any v / p register of the method fits
+    return pat.sub(f'{ind}{MARK}: the persist write test cannot pass on the Lenovo persist\n{ind}const/16 {reg}, 0x1', text)
+
+
+def patch_tree(decoded):
+    """Patch an apktool-decoded tree in place; returns the two patched smali paths (relative)."""
+    found = {'role': [], 'lut': []}
+    for path in sorted(glob.glob(os.path.join(decoded, 'smali*', '**', '*.smali'), recursive=True)):
+        text = open(path, encoding='utf-8').read()
+        for key, fn in (('role', patch_role_table), ('lut', patch_lut_check)):
+            out = fn(text)
+            if out is None:
+                continue
+            found[key].append(os.path.relpath(path, decoded))
+            if out != text:
+                open(path, 'w', encoding='utf-8').write(out)
+                text = out
+    for key, what in (('role', '角色表'), ('lut', 'MIVILutSaver.testPermission()')):
+        if len(found[key]) != 1:
+            raise SourceError(f'小米相机：{what} 应在 1 个文件里，找到 {len(found[key])} 个：这个版本没核对过，不打补丁')
+    return found['role'][0], found['lut'][0]
+
+
+# ---------------------------------------------------------------- build
+
+_JAVA = []
+
+
+def find(name):
+    """Path of java / apktool / zipalign / apksigner, or None (macOS's /usr/bin/java stub does not count)."""
+    if name == 'java':
+        if _JAVA:
+            return _JAVA[0]
+        home = os.environ.get('JAVA_HOME')
+        cands = ([os.path.join(home, 'bin', 'java')] if home else []) + [shutil.which('java')] + \
+            ['/opt/homebrew/opt/openjdk/bin/java', '/usr/local/opt/openjdk/bin/java']
+        found = next((c for c in cands if c and os.access(c, os.X_OK) and _java_ok(c)), None)
+        if found:
+            _JAVA.append(found)
+        return found
+    return shutil.which(name) or _sdk_tool(name)
+
+
+def tool_env():
+    """Environment with the found Java first on PATH (apktool and the SDK's apksigner script start java)."""
+    env = dict(os.environ)
+    java = find('java')
+    if java:
+        env['PATH'] = os.path.dirname(java) + os.pathsep + env.get('PATH', '')
+        env.setdefault('JAVA_HOME', os.path.dirname(os.path.dirname(os.path.realpath(java))))
+    return env
+
+
+def tools():
+    """Paths of java, apktool, zipalign, apksigner; SourceError naming what is missing."""
+    found, missing = {}, []
+    for n in ('java', 'apktool', 'zipalign', 'apksigner'):
+        p = find(n)
+        if p:
+            found[n] = p
+        else:
+            missing.append(n)
+    if missing:
+        raise SourceError('小米相机前摄修复要 ' + '、'.join(missing) +
+                          '：JDK + apktool；zipalign / apksigner 在 Android SDK build-tools 里（见 docs/testing.md）')
+    return found
+
+
+def _sdk_tool(name):
+    roots = [os.environ.get('ANDROID_HOME'), os.environ.get('ANDROID_SDK_ROOT'),
+             os.path.expanduser('~/Library/Android/sdk'), os.path.expanduser('~/Android/Sdk'),
+             '/opt/homebrew/share/android-commandlinetools', '/usr/local/share/android-commandlinetools']
+    for r in filter(None, roots):
+        # newest build-tools by version number (a text sort puts 9.0.0 after 36.0.0)
+        cands = sorted(glob.glob(os.path.join(r, 'build-tools', '*', name)),
+                       key=lambda c: tuple(int(x) for x in re.findall(r'\d+', os.path.basename(os.path.dirname(c)))))
+        if cands:
+            return cands[-1]
+    return None
+
+
+def _java_ok(p):
+    try:
+        return subprocess.run([p, '-version'], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def run(cmd, what):
+    p = subprocess.run(cmd, capture_output=True, text=True, env=tool_env())
+    if p.returncode:
+        raise SourceError(f'{what} 失败：{(p.stdout + p.stderr).strip()[-600:]}')
+    return p.stdout
+
+
+SIGNATURE_FILES = re.compile(r'^META-INF/([^/]+\.(SF|RSA|DSA|EC)|MANIFEST\.MF)$', re.I)
+
+
+def _dex_of(smali_rel):
+    """smali/... -> classes.dex, smali_classes7/... -> classes7.dex"""
+    top = smali_rel.split('/', 1)[0]
+    return 'classes.dex' if top == 'smali' else top.replace('smali_', '') + '.dex'
+
+
+def build(apk, out_apk, work):
+    """Patched, aligned and signed copy of apk at out_apk; returns what changed (for framework.json).
+
+    Only the dex files go through apktool: an APK holds entries whose names differ only in case (Xiaomi's
+    obfuscated res/-KN.xml and res/-kn.xml), which a case-insensitive file system (macOS) merges when the whole
+    APK is unpacked to disk. So the result is the original APK, entry by entry (same order and name, the original
+    compressed bytes copied as they are, see repack()), with only the patched dex replaced (stored) and the old
+    signature files dropped; then zipalign and apksigner. Byte-reproducible given the same apktool / smali.
+    The work directory is removed afterwards, also on failure.
+    """
+    t = tools()
+    for n in ('testkey.pk8', 'testkey.x509.pem'):
+        if not os.path.isfile(os.path.join(KEY_DIR, n)):
+            raise SourceError(f'缺 tools/apksign/{n}（仓库自带，重新检出）')
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work)
+    try:
+        return _build(t, apk, out_apk, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _build(t, apk, out_apk, work):
+    with zipfile.ZipFile(apk) as z:
+        names = z.namelist()
+        if len(set(names)) != len(names):
+            raise SourceError('小米相机 APK 里有重名的条目：不打补丁')
+        dexes = [n for n in names if re.fullmatch(r'classes\d*\.dex', n)]
+        # a dex-only copy for apktool (the manifest so apktool accepts it, no resources)
+        dex_apk = os.path.join(work, 'dex-only.apk')
+        with zipfile.ZipFile(dex_apk, 'w', zipfile.ZIP_DEFLATED) as d:
+            for n in ['AndroidManifest.xml'] + dexes:
+                d.writestr(n, z.read(n))
+    dec = os.path.join(work, 'decoded')
+    run([t['apktool'], 'd', '-r', '-f', '-o', dec, dex_apk], 'apktool 解包小米相机的 dex')
+    role, lut = patch_tree(dec)
+    rebuilt = os.path.join(work, 'rebuilt.apk')
+    run([t['apktool'], 'b', '-o', rebuilt, dec], 'apktool 重新打包小米相机的 dex')
+    patched = {_dex_of(role), _dex_of(lut)}
+    with zipfile.ZipFile(rebuilt) as r:
+        new_dex = {n: r.read(n) for n in patched}
+    unsigned = os.path.join(work, 'unsigned.apk')
+    repack(apk, unsigned, new_dex)
+    with zipfile.ZipFile(apk) as z, zipfile.ZipFile(unsigned) as u:
+        want = [n for n in z.namelist() if not SIGNATURE_FILES.match(n)]
+        if u.namelist() != want or u.testzip() is not None:
+            raise SourceError('小米相机：重新打包后的条目和原 APK 对不上（或校验和不对）：不打补丁')
+    aligned = os.path.join(work, 'aligned.apk')
+    run([t['zipalign'], '-f', '-p', '4', unsigned, aligned], 'zipalign')
+    signed = os.path.join(work, 'signed.apk')
+    # apksigner picks the schemes for the APK's minSdk (v3 for this one, like the original); no v4 .idsig side file
+    # (only incremental install uses it), so only the APK leaves work/
+    run([t['apksigner'], 'sign', '--v4-signing-enabled', 'false', '--key', os.path.join(KEY_DIR, 'testkey.pk8'),
+         '--cert', os.path.join(KEY_DIR, 'testkey.x509.pem'), '--out', signed, aligned], 'apksigner 签名')
+    run([t['apksigner'], 'verify', signed], 'apksigner 核对签名')
+    with zipfile.ZipFile(apk) as z, zipfile.ZipFile(signed) as g:
+        orig = {n for n in z.namelist() if not SIGNATURE_FILES.match(n)}
+        got = {n for n in g.namelist() if not SIGNATURE_FILES.match(n)}
+        if orig != got:
+            raise SourceError(f'小米相机：签名后的条目和原 APK 不一致（少 {len(orig - got)}、多 {len(got - orig)}）：不打补丁')
+        changed = sorted(n for n in orig if z.getinfo(n).CRC != g.getinfo(n).CRC)
+        if set(changed) != patched:
+            raise SourceError(f'小米相机：内容变了的条目是 {changed}，应只有 {sorted(patched)}：不打补丁')
+    shutil.copyfile(signed, out_apk)
+    return {'role_table': role, 'lut_check': lut, 'dex': sorted(patched), 'tools': versions(t)}
+
+
+def repack(src_apk, dst, replace):
+    """dst = src_apk without its signature files; every other entry keeps its compressed bytes exactly as they are
+    (no recompression, so the result does not depend on this host's zlib), the entries in `replace` are stored
+    uncompressed (Android reads uncompressed dex directly). Same order, names, method and timestamps; no extra fields
+    or data descriptors (zipalign pads, apksigner signs)."""
+    import struct
+    with zipfile.ZipFile(src_apk) as z, open(src_apk, 'rb') as f, open(dst, 'wb') as o:
+        central = []
+        for info in z.infolist():
+            if SIGNATURE_FILES.match(info.filename):
+                continue
+            name = info.filename.encode('utf-8')
+            flags = 0x800 if any(ord(c) > 127 for c in info.filename) else 0
+            if info.filename in replace:
+                data = replace[info.filename]
+                method, crc, csize, usize = zipfile.ZIP_STORED, zlib.crc32(data) & 0xffffffff, len(data), len(data)
+            else:
+                f.seek(info.header_offset)
+                sig, *_rest, nlen, elen = struct.unpack('<IHHHHHIIIHH', f.read(30))
+                if sig != 0x04034b50 or info.flag_bits & 1:
+                    raise SourceError(f'小米相机：{info.filename} 的本地头不对或是加密的：不打补丁')
+                f.seek(info.header_offset + 30 + nlen + elen)
+                data = f.read(info.compress_size)
+                method, crc, csize, usize = info.compress_type, info.CRC, info.compress_size, info.file_size
+            if max(csize, usize, o.tell()) >= 0xffffffff:
+                raise SourceError('小米相机：APK 需要 zip64，不打补丁')
+            y, mo, d, h, mi, sec = info.date_time
+            dtime, ddate = (h << 11) | (mi << 5) | (sec // 2), ((y - 1980) << 9) | (mo << 5) | d
+            off = o.tell()
+            o.write(struct.pack('<IHHHHHIIIHH', 0x04034b50, 20, flags, method, dtime, ddate, crc, csize, usize,
+                                len(name), 0) + name)
+            o.write(data)
+            central.append(struct.pack('<IHHHHHHIIIHHHHHII', 0x02014b50, 20, 20, flags, method, dtime, ddate, crc,
+                                       csize, usize, len(name), 0, 0, 0, 0, 0, off) + name)
+        cd_off = o.tell()
+        for c in central:
+            o.write(c)
+        if len(central) >= 0xffff or cd_off >= 0xffffffff:
+            raise SourceError('小米相机：APK 需要 zip64，不打补丁')
+        o.write(struct.pack('<IHHHHIIH', 0x06054b50, 0, 0, len(central), len(central), o.tell() - cd_off, cd_off, 0))
+
+
+def versions(t):
+    """Tool versions for framework.json (the rebuilt dex depends on apktool / smali)."""
+    out = {}
+    for n, args in (('apktool', ['--version']), ('apksigner', ['version']), ('java', ['-version'])):
+        try:
+            p = subprocess.run([t[n]] + args, capture_output=True, text=True, timeout=60, env=tool_env())
+            # the version line, not JVM warnings (java prints its version on stderr, the others on stdout)
+            lines = [l for l in (p.stderr if n == 'java' else p.stdout).splitlines() if re.search(r'\d+\.\d+|version', l)]
+            out[n] = lines[0].strip()[:80] if lines else '?'
+        except (OSError, subprocess.SubprocessError):
+            out[n] = '?'
+    return out

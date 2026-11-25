@@ -4,7 +4,9 @@
 #   TB_WORK           work directory with those inputs (build/ and out/ are recreated)
 # Runs vendor, framework (with / without Find Device), bootchain twice and package; every step does its own checks
 # and stops with a non-zero exit on any mismatch. Nothing is written to a device. The AOSP avbtool / test keys /
-# mkbootimg come with the repository (tools/avb, tools/mkbootimg).
+# mkbootimg / app test key come with the repository (tools/avb, tools/mkbootimg, tools/apksign); framework also needs
+# Java, apktool, zipalign and apksigner for the Xiaomi Camera fix (Debian: default-jre-headless apktool zipalign
+# apksigner; run tb710fu.py doctor on the runner).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 : "${TB_WORK:?set TB_WORK}"
