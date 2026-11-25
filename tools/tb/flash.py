@@ -178,6 +178,15 @@ def raw_vbmeta(name):
     return (name[:-2] if name.endswith(('_a', '_b')) else name) in RAW_VBMETA
 
 
+def write_length(src, name, nbytes):
+    """Bytes `write_file` really writes for an `nbytes` image of `name`: a short vbmeta / vbmeta_system fills the
+    partition. The checks before the first write (no_overlap) must use the same length."""
+    p = src.parts.get(name)
+    if raw_vbmeta(name) and p and p.get('bytes') and nbytes < p['bytes']:
+        return p['bytes']
+    return nbytes
+
+
 def zero_padded(path, nbytes, workdir):
     """`path` followed by zeros up to `nbytes`, as a new file in `workdir`."""
     out = os.path.join(workdir, 'padded-' + os.path.basename(path))
@@ -207,9 +216,10 @@ class Writer:
         if n != expect['bytes'] or want != expect['sha256']:
             raise SourceError(f'{path} 和核对时的记录不一致（核对之后被改过？）：没有写 {name}')
         note = ''
-        if raw_vbmeta(name) and n < p['bytes']:        # the rest of the partition becomes zeros, not what was there
-            path, note = zero_padded(path, p['bytes'], self.work), f'，补零到整个分区 {p["bytes"]} 字节'
-            n, want = p['bytes'], file_sha256(path)
+        full = write_length(self.src, name, n)
+        if full != n:                                   # the rest of the partition becomes zeros, not what was there
+            path, note = zero_padded(path, full, self.work), f'，补零到整个分区 {full} 字节'
+            n, want = full, file_sha256(path)
         print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB{note}）…', flush=True)
         self._ws(p, path)
         self.verify(name, p, n, want)
@@ -371,7 +381,7 @@ def run(src, pkg, stage, backup_dir=None, dry_run=False, assume_yes=False):
             nb = wipe_bytes(src, n)
             target(src, n, nb)
             wipes.append((n, nb))
-    no_overlap(src, [(d, m['files'][f]['bytes']) for d, f in plan.items()] + wipes)
+    no_overlap(src, [(d, write_length(src, d, m['files'][f]['bytes'])) for d, f in plan.items()] + wipes)
     print(f'\n==== 写入计划（{stage}，槽 {slot}，平板 {short_serial(dev.get("chip_serial"))}）====\n{plan_lines(rows)}')
     for n, nb in wipes:
         print(f'  {n:18} ← 清零前 {nb / 2**20:.0f} MiB（恢复出厂，平板上的用户数据全部丢失）')
@@ -432,7 +442,7 @@ def restore(src, backup_dir=None, assume_yes=False, dry_run=False):
             raise SourceError(f'备份里没有 {part}')
         target(src, part, st['items'][f'{part}.bin']['bytes'])
         rows.append((part, f))
-    no_overlap(src, [(part, st['items'][f'{part}.bin']['bytes']) for part, _ in rows])
+    no_overlap(src, [(part, write_length(src, part, st['items'][f'{part}.bin']['bytes'])) for part, _ in rows])
     rb_dev, rb_bak = rollback_now(src, slot), rollback_of_backup(bdir, slot)
     low = {k: (rb_bak.get(k), v) for k, v in rb_dev.items() if rb_bak.get(k) is None or rb_bak[k] < v}
     if low:

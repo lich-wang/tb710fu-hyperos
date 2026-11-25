@@ -244,6 +244,8 @@ def plan(src, img):
         n = (TABLE['files'][f]['bytes'] + SS - 1) // SS
         if not (part[0] <= start and start + n <= part[0] + part[1]):
             raise SourceError(f'{f} 写到 LUN{lun} 扇区 {start} 会超出 {label}')
+        if raw_vbmeta(label) and start == part[0]:
+            n = part[1]                         # written zero-padded to the whole partition (vbmeta_pad)
         rng = {'lun': lun, 'start': start, 'sectors': n}
         for u in UNIQUE:
             for lu, ents in gpts.items():
