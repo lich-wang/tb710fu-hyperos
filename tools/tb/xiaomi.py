@@ -17,6 +17,9 @@ WANT = ('system', 'system_ext', 'product', 'mi_ext', 'vendor', 'odm')
 # Versions this project has been verified with, by the OTA's post-build fingerprint (the OS4.x version name only
 # appears in the file name). Official download address: doctor prints it (tools/tb/doctor.py XIAOMI).
 VERIFIED = {
+    'Xiaomi/yupei/yupei:17/CP2A.260605.016/17OS4.0.261026.234932407.QCPDCN.S:user/release-keys': {
+        'version': 'OS4.0.12.0.XPZCNXM', 'zip': 'yupei-ota_full-OS4.0.12.0.XPZCNXM-user-17.0-e8fb5f8e57.zip',
+        'bytes': 10049353444},
     'Xiaomi/yupei/yupei:17/CP2A.260605.016/17OS4.0.260913.205532236.QCPDCN.S:user/release-keys': {
         'version': 'OS4.0.5.0.XPZCNXM', 'zip': 'yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip',
         'bytes': 9922261403},
