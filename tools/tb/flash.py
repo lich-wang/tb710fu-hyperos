@@ -23,6 +23,10 @@ UNIQUE = ('persist', 'modemst1', 'modemst2', 'fsg', 'fsc', 'devinfo', 'frp', 'ke
           'uefivarstore', 'cdt', 'ddr', 'proinfo', 'lenovolock')
 BOOT_CHAIN = ('boot', 'init_boot', 'dtbo', 'vendor_boot', 'vbmeta', 'vbmeta_system')
 RESTORE_CHAIN = BOOT_CHAIN + ('recovery', 'abl')
+# vbmeta / vbmeta_system hold a bare AVB image, no footer: a shorter image written over a longer one leaves the old tail
+# behind it, and tools that later re-sign in place (the ArmadaOS Freedom installer) refuse to grow over non-zero bytes.
+# These are always written zero-padded to the whole partition.
+RAW_VBMETA = ('vbmeta', 'vbmeta_system')
 WIPE = {'metadata': None, 'userdata': 64 << 20}     # bytes zeroed from the start (None = the whole partition)
 CHUNK = 1 << 22
 
@@ -169,6 +173,20 @@ def precheck(src, serial_want, slot_want):
 
 # ---------------------------------------------------------------- writes
 
+def raw_vbmeta(name):
+    """True for vbmeta / vbmeta_system of either slot (or without a slot suffix)."""
+    return (name[:-2] if name.endswith(('_a', '_b')) else name) in RAW_VBMETA
+
+
+def zero_padded(path, nbytes, workdir):
+    """`path` followed by zeros up to `nbytes`, as a new file in `workdir`."""
+    out = os.path.join(workdir, 'padded-' + os.path.basename(path))
+    with open(path, 'rb') as f, open(out, 'wb') as o:
+        shutil.copyfileobj(f, o, CHUNK)
+        o.truncate(nbytes)
+    return out
+
+
 class Writer:
     """Writes files / zeros to GPT-located partitions and reads every write back."""
 
@@ -188,9 +206,15 @@ class Writer:
         want = file_sha256(path)
         if n != expect['bytes'] or want != expect['sha256']:
             raise SourceError(f'{path} 和核对时的记录不一致（核对之后被改过？）：没有写 {name}')
-        print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB）…', flush=True)
+        note = ''
+        if raw_vbmeta(name) and n < p['bytes']:        # the rest of the partition becomes zeros, not what was there
+            path, note = zero_padded(path, p['bytes'], self.work), f'，补零到整个分区 {p["bytes"]} 字节'
+            n, want = p['bytes'], file_sha256(path)
+        print(f'  写 {name}（LUN {p["lun"]}，扇区 {p["start"]}，{n / 2**20:.1f} MiB{note}）…', flush=True)
         self._ws(p, path)
         self.verify(name, p, n, want)
+        if note:
+            os.remove(path)
 
     def zero(self, name):
         n = wipe_bytes(self.src, name)
