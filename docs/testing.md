@@ -56,9 +56,14 @@ python3 tools/tb710fu.py doctor --usb                 # 9008 实操：按提示�
 ```
 
 - `doctor` 每一项没准备好都会给出处理办法，缺的下载会直接给出地址和字节数。全部 ✅ 再往下走。
-- **小米底包**（必需）：yupei `OS4.0.5.0.XPZCNXM` 卡刷全量包，约 9.9 GB，放到 `work/`。地址 `doctor` 会打印：
-  `https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.5.0.XPZCNXM/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip`。
-  文件名里的 `4fe489f542` 是 md5 的前 10 位，`--verify-downloads` 会核对。大文件用 `aria2c -c -x 16 -s 16 <地址>`（可断点续传）。
+- **小米底包**（必需）：yupei 卡刷全量包（约 10 GB），放到 `work/`。验证过的版本任选一个，推荐最新的；地址 `doctor` 会打印：
+  - `OS4.0.12.0.XPZCNXM`（2026-11-03，推荐）：
+    `https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.12.0.XPZCNXM/yupei-ota_full-OS4.0.12.0.XPZCNXM-user-17.0-e8fb5f8e57.zip`
+  - `OS4.0.5.0.XPZCNXM`：
+    `https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.5.0.XPZCNXM/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip`
+
+  文件名最后的 10 位十六进制是 md5 的前 10 位，`--verify-downloads` 会核对。大文件用 `aria2c -c -x 16 -s 16 <地址>`（可断点续传）。
+  下面命令里的版本号换成你下载的那个。
 - **联想官方 9008 包**（视情况）：平板还是原厂系统时不需要（`pull` 从你自己的备份取）；已刷过别的系统时要用它取联想组件。
   9008 加载器也在这个包里（`xbl_s_devprg_ns.melf`）：`7zz e 联想包.7z -owork/firehose -r xbl_s_devprg_ns.melf`。地址见 [boot-chain.md](boot-chain.md) 或 `doctor` 的输出。
 - **USB 驱动**：macOS 不需要装驱动；Linux 要有高通 9008（`05c6`）的 udev 规则，ModemManager 最好先停掉，`doctor` 会检查；Windows 暂不支持。
@@ -159,4 +164,5 @@ python3 tools/tb710fu.py report     # 原来的版本线索、ABL 状态和公�
   这个判断来自静态分析和 Y700 四代的实证，TB710FU 原厂 495 上的第一次刷入正是要验证它。报告里请写明 `check` 的结论。
 - **海外版（ROW）**：ROW 官方包的 rawprogram 是加密的，`pull --package` 用不了；平板还是原厂系统时可以 `pull` 自己的备份。
 - [porting.md](porting.md) 里标了"待真机"的项，例如设备兼容性矩阵缺的两个框架服务、联想自己的 lwky 服务。
-- 只验证过 yupei `OS4.0.5.0.XPZCNXM`；更新的小米版本 `import` 会提示未验证，需要 `--force`，结果请在报告里注明。
+- 验证过的小米版本：yupei `OS4.0.5.0.XPZCNXM`、`OS4.0.12.0.XPZCNXM`。更新的版本 `import` 会提示未验证，需要 `--force`，结果请在报告里注明；
+  验证通过后由维护者加进 `tools/tb/xiaomi.py` 的 `VERIFIED` 和 `tools/tb/doctor.py` 的 `XIAOMI`。

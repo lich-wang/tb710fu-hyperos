@@ -18,10 +18,13 @@ TESTKEY_SHA1 = {'testkey_rsa4096.pem': '2597c218aae470a130f61162feaae70afd97f011
 MIN_FREE = 150 << 30
 REPO_SLUG = 'lich-wang/tb710fu-hyperos'
 
-# yupei full OTA verified by this project: file name, size, md5 prefix (the 10 hex digits in its name), address
-XIAOMI = [('yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip', 9922261403, '4fe489f542',
-           'https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS4.0.5.0.XPZCNXM/'
-           'yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip')]
+# yupei full OTAs verified by this project, newest first: file name, size, md5 prefix (the 10 hex digits in its
+# name), address. One of them is enough; the newest is the one recommended.
+OTA_HOST = 'https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/'
+XIAOMI = [('yupei-ota_full-OS4.0.12.0.XPZCNXM-user-17.0-e8fb5f8e57.zip', 10049353444, 'e8fb5f8e57',
+           OTA_HOST + 'OS4.0.12.0.XPZCNXM/yupei-ota_full-OS4.0.12.0.XPZCNXM-user-17.0-e8fb5f8e57.zip'),
+          ('yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip', 9922261403, '4fe489f542',
+           OTA_HOST + 'OS4.0.5.0.XPZCNXM/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip')]
 LOLINET = 'https://mirrors.lolinet.com/firmware/lenowow/2025/Yoga_Tab_2025/'
 LENOVO = [('CN 17.5.04.414', 'TB710FU_CN/TB710FU_CN_OPEN_USER_Q00019.0_A16_ZUI_17.5.04.414_ST_260320.7z', 9517603070),
           ('CN 17.0.04.354', 'TB710FU_CN/TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.354_ST_251111.7z', 9201119510),
@@ -195,12 +198,18 @@ def check_downloads(r, verify, loader=None):
         r.fail('没有 9008 加载器（firehose）',
                '从联想官方 9008 包里取出 xbl_s_devprg_ns.melf 放到 work/firehose/，例如：'
                f'7zz e 联想包.7z -owork/firehose -r xbl_s_devprg_ns.melf（包的地址见下面）')
+    found = []
     for name, size, md5p, url in XIAOMI:
         hits = glob.glob(os.path.join(WORK, '**', name), recursive=True) + glob.glob(os.path.join(WORK, '..', name))
-        if not hits:
-            r.fail(f'没有小米底包 {name}', f'下载到 work/：{url}\n       （{size} 字节；建议 aria2c -c -x 16 -s 16 <地址>）')
-            continue
-        p = hits[0]
+        if hits:
+            found.append((hits[0], name, size, md5p))
+    if not found:
+        name, size, _, url = XIAOMI[0]
+        r.fail(f'没有小米底包（验证过的：{"、".join(n.split("-")[2] for n, *_ in XIAOMI)}）',
+               f'下载最新的到 work/：{url}\n       （{size} 字节；建议 aria2c -c -x 16 -s 16 <地址>）')
+    elif found[0][1] != XIAOMI[0][0]:
+        r.note(f'有更新的验证过的小米底包：{XIAOMI[0][0].split("-")[2]}', f'可以下载：{XIAOMI[0][3]}')
+    for p, name, size, md5p in found:
         got = os.path.getsize(p)
         if got != size:
             r.fail(f'{p} 大小 {got}，应为 {size}（没下完？）', 'aria2c -c 断点续传')
