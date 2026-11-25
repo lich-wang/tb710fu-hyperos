@@ -139,6 +139,9 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
       在这台平板上要么校验失败，要么把不匹配的固件写进另一个槽。升级改走本项目。`system_ext/bin/miupdater`（只在
       `persist.sys.cota.partition` 被设置时，往 `opcust` / `opconfig` / `md1img_a` 写运营商定制包）没去掉：这几个分区 TB710FU 上都没有。
   - 不再需要 `sepolicy_compat.cil`、移植包的 PearlBiometric 人脸，以及 lwky 的分辨率、窗口规则、智能充电、机型伪装。
+  - OS4.0.12.0（2026-11-03，和 4.0.5.0 同一个 Android 基线 `CP2A.260605.016`，只换了小米自己的增量）：`framework` 不用改代码。
+    小米相机的混淆类名变了（角色表 `r6.1/e` → `s6.1/d`，persist 自检 `E1/Y0` → `F1/R0`），按日志字符串 / 未混淆类名定位仍各找到唯一一处；
+    `app/Updater` 位置没变。真机（装着 Freedom，`flash --stage system`）进桌面正常，`verifiedbootstate=green`。
   - OS4.0.5.0 实测（3 分 36 秒）：和小米原镜像逐项比对，system 只有 `build.prop` 内容变了、新增 10 个条目；product 只有 `etc/build.prop` 变了，删掉 pangu（24 个条目）、新增 mi_ext 的 139 个条目。所有共有路径的元数据都不变，新增条目都有指定的元数据。
   - 待真机：人脸解锁（yupei 声明的是 TEE 人脸，这里没有）、`device_features/yupei.xml` 里的 144Hz 等参数和这块屏是否相符。
 - **#8（启动链）✅**：`tb710fu.py bootchain [--no-verity]`，详见 [boot-chain.md](boot-chain.md#新流程的启动链bootchain)。
