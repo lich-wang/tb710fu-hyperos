@@ -87,10 +87,10 @@ class EdlSource:
         mode = usb_mode()
         if mode == '900e':
             raise SourceError('平板在 900E（内核崩溃转储模式），不是 9008。拔线，长按电源 15–20 秒关机，'
-                              '再按住音量+和音量−插线进 9008。')
+                              '再按住音量+插线进 9008。')
         if mode is None:
             raise SourceError('没检测到 9008 设备。进入 9008：已 root 的系统里 `adb reboot edl`；'
-                              '或拔线 → 长按电源 15–20 秒关机 → 按住音量+和音量−插线。')
+                              '或拔线 → 长按电源 15–20 秒关机 → 按住音量+插线。')
         out = self.edl('printgpt', ok=r'Parsing Lun 0')
         self.sahara = layout.sahara_info(out)
         self.parts = layout.parse_printgpt(out)
