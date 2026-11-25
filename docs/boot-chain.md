@@ -277,7 +277,7 @@ python3 tools/tb710fu.py restore-stock --package TB710_ZUXOS_1.5.04.495_Tool.7z 
 
 ## 9008（EDL）
 
-- 进入：`adb reboot edl`（需 root 或在 Android 下），或者拔线 → 长按电源 15–20 s 关机 → 按住音量+和音量−插线。
+- 进入：`adb reboot edl`（需 root 或在 Android 下），或者关机状态下按住音量+、插上 USB 线（只按音量+；平板开着或卡住时先拔线、长按电源 15–20 s 关机）。
 - 工具：[bkerler/edl](https://github.com/bkerler/edl) + 该机型的 firehose programmer（刷机包 `bin/9008/prog_firehose_ddr-TB710FU.melf`）。
   ```
   edl printgpt --lun=0 --loader=prog_firehose_ddr-TB710FU.melf --memory=ufs
