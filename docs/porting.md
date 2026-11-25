@@ -134,6 +134,9 @@ product 侧的其他改动（`pagesize.max`、`lcd_density`、device_features、
       `CONTROL_DEVICE_STATE` 没给（小米原来的签名也拿不到），小米自己的图库、安全中心、省电、媒体资产等权限都在。
       代价：签名变了，应用商店推送的小米相机更新会因签名不符装不上——相机要随本项目的刷机包升级（#50）。
       思路来自旧移植包的 `tb710fu_camfix_v1` 模块（它改的是另一个版本的 APK，这里不带它）。
+    - **去掉系统自带更新 `app/Updater`（#49）**：它把平板当成小米平板 8（yupei），会下载 yupei 的官方 OTA（带 SM8750 的底层固件和 vendor），
+      在这台平板上要么校验失败，要么把不匹配的固件写进另一个槽。升级改走本项目。`system_ext/bin/miupdater`（只在
+      `persist.sys.cota.partition` 被设置时，往 `opcust` / `opconfig` / `md1img_a` 写运营商定制包）没去掉：这几个分区 TB710FU 上都没有。
   - 不再需要 `sepolicy_compat.cil`、移植包的 PearlBiometric 人脸，以及 lwky 的分辨率、窗口规则、智能充电、机型伪装。
   - OS4.0.5.0 实测（3 分 36 秒）：和小米原镜像逐项比对，system 只有 `build.prop` 内容变了、新增 10 个条目；product 只有 `etc/build.prop` 变了，删掉 pangu（24 个条目）、新增 mi_ext 的 139 个条目。所有共有路径的元数据都不变，新增条目都有指定的元数据。
   - 待真机：人脸解锁（yupei 声明的是 TEE 人脸，这里没有）、`device_features/yupei.xml` 里的 144Hz 等参数和这块屏是否相符。
