@@ -143,6 +143,7 @@ python3 tools/tb710fu.py report     # 原来的版本线索、ABL 状态和公�
 
 - **装了 ArmadaOS Freedom 的平板**：Freedom 安装器改过 boot / vbmeta / vbmeta_system / recovery，`flash` 的第一、第二阶段会拒绝。
   升级安卓只能用 `flash --stage system`（先重新 `backup`），见 [boot-chain.md](boot-chain.md) 的"装了 ArmadaOS Freedom 之后升级澎湃 OS"。
+  装完 Freedom 后安卓第一次开机会清数据：先 `--variant nofind` 过开机向导，再 `--variant find`。
   不要在澎湃 OS 里接受系统更新。
 
 - **内核与固件的搭配**：启动链用的是联想组件里的内核（例如 CN 414 的 6.1.128），平板底层固件不动。

@@ -108,7 +108,9 @@
    - 第二阶段写 `vbmeta_system` 和 `super`（换成带查找设备的版本），数据保留；
    - 升级写 `vbmeta_system`、`super` 和启动链里有变化的镜像，数据保留；userdata 不能回滚，提醒用户先另外备份个人文件；
    - 平板上装了 ArmadaOS Freedom 时（分区表有 `ARMADA_*`），第一、第二阶段会被拒绝；只能用 `flash --stage system`：
-     只写重签的 `vbmeta_system` 和 `super`，不碰 kShimC 启动菜单，数据保留（见 `docs/boot-chain.md`）；
+     只写重签的 `vbmeta_system` 和 `super`，不碰 kShimC 启动菜单，数据保留（见 `docs/boot-chain.md`）。
+     装完 Freedom 后第一次进安卓会先清数据、重走开机向导：这时先 `--variant nofind`，向导完成后再 `--variant find`
+     （带查找设备的版本会让向导卡住黑屏；不带查找设备的版本登录小米账号会闪退）；
    - `restore` 用这台平板自己的备份写回当前槽的启动链（含 `recovery`、`abl`）和 `super`，userdata 不动。
 2. 用户在对话里明确说同意，再运行真正的命令；工具要确认词时，问用户输入什么，照用户说的输入。
 3. 写完工具会读回比对。全部一致才算成功；有任何不一致，见下一节。
