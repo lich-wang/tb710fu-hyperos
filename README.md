@@ -37,7 +37,7 @@ ABL（未解锁，信任 AOSP testkey）
   详见 [docs/boot-chain.md](docs/boot-chain.md)。
 - **联想 vendor 跑小米框架需要补什么**：兼容性检查、差异清单、小米 HAL，见 [docs/porting.md](docs/porting.md)。
 - **全用官方来源**：联想组件从你自己的平板备份读（或联想官方 9008 包），小米组件来自小米官方 OTA；
-  刷机包在你自己的电脑上构建，只属于你这台平板（绑定芯片序列号、当前槽、回滚索引）。仓库不分发任何镜像。
+  刷机包在你自己的电脑上构建，只属于你这台平板（绑定芯片序列号、当前槽、回滚索引）。仓库不分发系统镜像（唯一例外：原厂 495 平板要换用的联想 CN 279 abl，见 [tools/THIRD_PARTY.md](tools/THIRD_PARTY.md)）。
 
 ## 文档
 
@@ -70,4 +70,4 @@ work/           （不入库）你自己设备的备份、底包、构建产物
 
 ## 许可
 
-GPL-2.0，见 [LICENSE](LICENSE)。本仓库不含任何小米、联想或高通的镜像与固件。
+GPL-2.0，见 [LICENSE](LICENSE)。本仓库不含小米、联想或高通的系统镜像；只原样带了一份联想 CN 17.0.04.279 的 `abl.elf`（`firmware/lenovo-cn-279/`，联想的二进制，不在 GPL 范围内，见 [tools/THIRD_PARTY.md](tools/THIRD_PARTY.md)）。

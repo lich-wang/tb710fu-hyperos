@@ -80,10 +80,9 @@
 | 0 | `doctor` | | | 结论 `✅ 电脑这边准备好了`。不过就按每项的 `→` 处理，GitHub CLI 一项也要过（第六节要用） |
 | 0 | 用户下载小米底包（`doctor` 打印的地址），之后 `doctor --verify-downloads` | | | 小米底包"大小、md5 都对" |
 | 0 | `doctor --usb` | 用户按键 | | `edl 能和平板通信` + `已让平板退出 9008 重启`：用户会手动进 9008 了 |
-| 1 | `check` | ✔ | | ABL 信任 AOSP 测试密钥，或判为"联想原厂 495"（要换 abl，见第 3 步后的 `abl`）；不信任就到此为止，提报告 |
+| 1 | `check` | ✔ | | ABL 信任 AOSP 测试密钥，或判为"联想原厂 495"（要换 abl：仓库自带 CN 17.0.04.279 abl，`package` 自动取用）；不信任就到此为止，提报告 |
 | 2 | `backup` | ✔ | | 完整备份结束且核对通过；提醒用户另存一份 |
 | 3 | `pull`（平板已不是原厂系统：`pull --package <联想国行官方包.7z>`） | | | 联想组件取出、检查通过 |
-| 3 | 只在 `check` 判为"联想原厂 495"时：用户下载联想官方 CN 17.0.04.279 线刷包（地址见 `docs/boot-chain.md`），`abl <包>` | | | `work/abl/abl.img` 取出、sha256 核对通过 |
 | 4 | `import work/<小米底包>.zip` | | | 导入完成（提示"未验证的版本"就停下，不要自己加 `--force`） |
 | 5 | `vendor` → `framework` → `framework --no-finddevice` | | | 每步结尾的检查全过 |
 | 6 | `bootchain --framework-dir work/build/framework/<版本>`，再对 `<版本>-nofind` 跑一次 | | | 两份启动链都签好、验证通过 |

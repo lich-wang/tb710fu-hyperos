@@ -5,7 +5,7 @@ Output: work/out/<Xiaomi version>-<chip serial>/
   vbmeta_system_nofind.img + super_nofind.img                     first boot / setup wizard (no Find Device app)
   vbmeta_system_find.img   + super_find.img                       after the setup wizard
   abl.img                  only when the device's ABL is Lenovo's stock ZUXOS 1.5.04.495 (verifies with Lenovo's key):
-                           the CN 17.0.04.279 ABL (tb710fu.py abl), written to the current slot in the first stage
+                           the CN 17.0.04.279 ABL (abl.py; the repository copy unless `tb710fu.py abl` chose one), written to the current slot in the first stage
   manifest.json   sha256 of every file, the inputs (Lenovo / Xiaomi versions), the device it is bound to
                   (chip serial, HWID, OEM PK hash, slot, rollback indexes, super size) and the write plan
 super holds the current slot's logical partitions (the other slot's are empty); it is written from the start
