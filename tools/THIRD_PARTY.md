@@ -30,4 +30,16 @@ sha256：
 
 更新：从上面的地址按新的提交取同名文件替换，更新本表，再完整跑一遍构建（`tools/ci/build.sh`）核对结果。
 
+## 联想 CN 17.0.04.279 的 abl
+
+| 文件 | 来源 | 字节 | sha256 |
+|---|---|---|---|
+| `firmware/lenovo-cn-279/abl.elf` | 联想官方 TB710FU CN ZUI 17.0.04.279 9008 线刷包（`TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z`）里的 `abl.elf`，原样 | 241464 | `45106e3b7864be760a2631d9a12780604040153ac23541e11e2e23e028dd0489` |
+
+联想的二进制（联想证书签名），不是本项目的代码，不在 GPL-2.0 范围内。只给联想官方原厂 ZUXOS 1.5.04.495 的平板用：
+那台平板的 abl 只认联想自己的密钥，测试密钥签的启动链要换成这份只认 AOSP 测试密钥的 abl（见 docs/boot-chain.md）。
+放进仓库是为了不让每个人为了 1 MiB 的分区再下载约 9 GB 的线刷包；补 0 到 1 MiB 后（`6cfa16e6…`）就是
+联想 "495 免解锁补充包" 的 abl.img，也和 Freedom 安装器内置的 `abl_aosp_capable.img` 相同。
+代码每次使用都按 `tools/tb/abl.py` 的 `PINNED` 核对 sha256；不想用仓库这份，`tb710fu.py abl <联想官方包>` 可以自己取。
+
 不放进仓库的：bkerler/edl（`doctor` 给出安装命令，装在 `tools/venv/`）、9008 加载器（联想官方包里的二进制，放 `work/firehose/`）。

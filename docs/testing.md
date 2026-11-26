@@ -81,7 +81,6 @@ python3 tools/tb710fu.py doctor --usb   # 环境和 9008 都通了再开始（�
 python3 tools/tb710fu.py check          # 只读：ABL 是否信任测试密钥，生成设备档案 work/device/latest.json
 python3 tools/tb710fu.py backup         # 只读：完整备份（二十多 GB，断了重跑会接着读）——备份目录另存一份！
 python3 tools/tb710fu.py pull           # 从备份取联想原厂组件（平板已不是原厂系统时：pull --package 联想官方包.7z）
-python3 tools/tb710fu.py abl 联想CN279包.7z   # 只有 check 说"联想原厂 495"时才要：取替换用的 CN 17.0.04.279 abl
 python3 tools/tb710fu.py import work/yupei-ota_full-OS4.0.5.0.XPZCNXM-user-17.0-4fe489f542.zip
 python3 tools/tb710fu.py vendor
 python3 tools/tb710fu.py framework

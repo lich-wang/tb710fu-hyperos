@@ -199,7 +199,7 @@ def verdict(prof):
         prof['testkey'] = 'needs_abl'
         prof['warnings'].append(f'ABL 是{abl["known"]}：里面虽然有测试公钥，但校验 vbmeta 用的是联想自己的密钥。'
                                 '刷机包会把当前槽的 abl 换成只认测试密钥的 CN 17.0.04.279 abl'
-                                '（先跑 tb710fu.py abl <联想官方 CN 17.0.04.279 线刷包>）')
+                                '（仓库自带这份 abl，package 会自动取用）')
     elif abl.get('trusts_testkey') is False:
         prof['testkey'] = 'not_trusted'
         prof['errors'].append('ABL 只信任非测试密钥（多半是联想私钥）：锁着 BL 时 testkey 签名的镜像不会被接受')
@@ -395,7 +395,7 @@ def check_files(paths):
             print(f'  直接校验：{" ".join(v["hashed"])}')
     print('\n==== 结论 ====')
     word = {True: '✅ 信任 AOSP 测试密钥', False: '❌ 只信任非测试密钥（多半是联想私钥）', None: '❓ 判断不了',
-            'replace': '⚠ 联想原厂 495：只认联想自己的密钥，刷机时要换成 CN 17.0.04.279 abl（tb710fu.py abl）'}
+            'replace': '⚠ 联想原厂 495：只认联想自己的密钥，刷机时要换成 CN 17.0.04.279 abl（仓库自带）'}
     for name, tr in trusts:
         print(f'{name}：{word[tr]}')
     if not trusts:

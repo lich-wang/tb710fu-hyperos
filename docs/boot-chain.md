@@ -64,13 +64,16 @@ python3 tools/tb710fu.py check 固件文件夹/.zip/.7z/镜像  # 离线：官�
 - 所以原厂 495 上，`check` 判为"联想原厂 495"（设备档案 `testkey: needs_abl`），刷机包会在第一阶段把**当前槽的 abl** 换成
   CN 17.0.04.279 的 abl：只认测试密钥、联想证书签名，也就是"495 免解锁补充包"里的那份，参考平板一直跑的就是它
   （锁着 BL、`verifiedbootstate=green`）。换下来的原厂 abl 在完整备份里，`restore` 会写回。
-- 换用的 abl 只认这一份（补 0 到 1 MiB 后 sha256 `6cfa16e6…`，即 279 包里的 `abl.elf` `45106e3b…`）。从联想官方 CN 17.0.04.279 线刷包取：
+- 换用的 abl 只认这一份（补 0 到 1 MiB 后 sha256 `6cfa16e6…`，即 279 包里的 `abl.elf` `45106e3b…`）。
+  **仓库自带这份 `abl.elf`**（`firmware/lenovo-cn-279/abl.elf`，原样，来源见 [tools/THIRD_PARTY.md](../tools/THIRD_PARTY.md)），
+  `package` 发现还没准备 abl 时自动取用，不用另外下载。也可以手动准备，或者从联想官方包自己取：
 
   ```bash
-  python3 tools/tb710fu.py abl TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z   # 也可以是解压后的文件夹或 abl 镜像
+  python3 tools/tb710fu.py abl            # 用仓库自带的那份
+  python3 tools/tb710fu.py abl TB710FU_CN_OPEN_USER_QSM8650_V_ZUI_17.0.04.279_ST_250808.7z   # 联想官方包、解压后的文件夹或 abl 镜像
   ```
 
-  只读，不连平板；输出 `work/abl/abl.img`。sha256 不对就拒绝。
+  只读，不连平板；输出 `work/abl/abl.img`。不管从哪里来，sha256 不对就拒绝。
 - 启动链（`bootchain`）在原厂 495 上的差别：设备链上是联想密钥（boot、vbmeta_system 本来就重做）；recovery 不写，新 vbmeta 里
   recovery 的链式描述用**设备 recovery 自己的公钥**（联想的）；boot 是联想密钥签的，按设备回滚索引用测试密钥重签。
 - `flash` 写 abl 的条件：刷机包是按 `needs_abl` 的设备档案打的；文件是上面那一份；平板上现在的 abl 正是 `check` 读到的原厂 495

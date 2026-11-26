@@ -5,17 +5,21 @@ with is Lenovo's own (the same evidence as the Y700 Gen 4 OEM ABL, which rejects
 such a copy). A test-key boot chain therefore also needs the ABL of CN ZUI 17.0.04.279, which holds only the test
 key. The "495 no-unlock supplement" writes exactly that ABL, and the reference tablet has run it for months.
 
-`tb710fu.py abl SOURCE` takes that ABL from the official Lenovo CN 17.0.04.279 9008 package (.7z / .zip / folder,
-member abl.elf) or from an abl image (e.g. abl_a.bin of a backup), pads it to the 1 MiB partition and checks it
-byte for byte. Output: work/abl/abl.img + abl.json. Read only: nothing here talks to the device.
+The repository carries that abl.elf unchanged (firmware/lenovo-cn-279/abl.elf, see tools/THIRD_PARTY.md), so
+`tb710fu.py abl` with no argument uses it, and `package` takes it by itself when the ABL has not been resolved yet.
+`tb710fu.py abl SOURCE` takes it instead from the official Lenovo CN 17.0.04.279 9008 package (.7z / .zip / folder,
+member abl.elf) or from an abl image (e.g. abl_a.bin of a backup). Either way it is padded to the 1 MiB partition
+and checked byte for byte. Output: work/abl/abl.img + abl.json. Read only: nothing here talks to the device.
 """
 import json, os, tempfile, time
 
 from . import avb
 from .backup import file_sha256
-from .sources import WORK, SourceError, sha256
+from .sources import REPO, WORK, SourceError, sha256
 
 PARTITION_BYTES = 1 << 20
+# abl.elf of the official Lenovo CN ZUI 17.0.04.279 9008 package, unchanged (checked against PINNED on every use).
+BUNDLED = os.path.join(REPO, 'firmware', 'lenovo-cn-279', 'abl.elf')
 
 # The one replacement ABL: CN ZUI 17.0.04.279 abl.elf (241464 bytes, sha256 45106e3b…) zero-padded to the partition.
 PINNED = {
@@ -50,12 +54,12 @@ def output_dir():
 
 
 def load():
-    """The resolved ABL (path, info), checked again; SourceError when `abl` has not been run."""
+    """The resolved ABL (path, info), checked again; taken from the repository copy when `abl` has not been run."""
     d = output_dir()
     p = os.path.join(d, 'abl.img')
     if not os.path.isfile(p):
-        raise SourceError('平板的 abl 是联想原厂 495（只认联想自己的密钥），刷机包要同时换 abl：'
-                          '先跑 tb710fu.py abl <联想官方 CN 17.0.04.279 线刷包>')
+        print(f'平板的 abl 是联想原厂 495：刷机包要同时换成 {PINNED["source"]}，取仓库自带的那份', flush=True)
+        return resolve()
     if os.path.getsize(p) != PINNED['bytes'] or file_sha256(p) != PINNED['sha256']:
         raise SourceError(f'{p} 不是预期的 abl（大小或 sha256 不对）：重跑 tb710fu.py abl')
     return p, dict(PINNED)
@@ -71,9 +75,16 @@ def _pad_check(data, where):
     return padded
 
 
-def resolve(source):
-    """Take the pinned ABL from an official Lenovo package or an abl image -> (path, info)."""
+def resolve(source=None):
+    """Take the pinned ABL from the repository copy (source None), an official Lenovo package or an abl image
+    -> (path, info)."""
     from .lenovo import Package
+    bundled = source is None
+    if bundled:
+        source = BUNDLED
+        if not os.path.isfile(source):
+            raise SourceError(f'仓库里的 {source} 不见了：重新检出仓库（git checkout -- firmware），'
+                              '或者 tb710fu.py abl <联想官方 CN 17.0.04.279 线刷包>')
     if not os.path.exists(source):
         raise SourceError(f'{source} 不存在')
     low = source.lower()
@@ -82,7 +93,7 @@ def resolve(source):
             raise SourceError(f'{source}：太大，不是 abl 镜像（要联想官方线刷包或 abl 镜像）')
         with open(source, 'rb') as f:
             data = _pad_check(f.read(), source)
-        origin = {'kind': 'image', 'path': os.path.abspath(source)}
+        origin = {'kind': 'bundled' if bundled else 'image', 'path': os.path.abspath(source)}
     else:
         pkg = Package(source)
         try:

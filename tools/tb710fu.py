@@ -12,8 +12,9 @@
   tb710fu.py vendor                    vendor side of the new super from the Lenovo stock parts (docs/porting.md)
   tb710fu.py framework                 system, system_ext, product from the imported Xiaomi images (docs/porting.md)
   tb710fu.py bootchain                 boot chain + verity footers, test-key signed at the device's rollback indexes
-  tb710fu.py abl SOURCE                only for the stock ZUXOS 1.5.04.495 ABL: the CN 17.0.04.279 ABL that replaces it,
-                                       from the official Lenovo CN 279 9008 package (or an abl image), checked
+  tb710fu.py abl [SOURCE]              only for the stock ZUXOS 1.5.04.495 ABL: the CN 17.0.04.279 ABL that replaces it,
+                                       the repository copy by default (or from the official Lenovo CN 279 9008
+                                       package / an abl image), checked; package does this by itself
   tb710fu.py package                   flash package for this tablet (super with / without Find Device + manifest)
   tb710fu.py flash [--stage first|after-setup|upgrade|system]   9008: write the package (asks first; reads every write back)
   tb710fu.py restore                   9008: write the boot chain and super back from the tablet's own backup
@@ -254,8 +255,10 @@ def main():
     c.add_argument('--backup', help='设备完整备份（默认最新）')
     c.add_argument('--profile', help='设备档案（默认 work/device/latest.json）')
     c.add_argument('--no-verity', action='store_true', help='vbmeta flags=1，关闭 dm-verity（备用方案）')
-    l = sub.add_parser('abl', help='设备 abl 是联想原厂 495 时：取出替换用的 CN 17.0.04.279 abl（只读，不连设备）')
-    l.add_argument('source', help='联想官方 CN 17.0.04.279 线刷包（.7z / .zip / 文件夹），或 abl 镜像')
+    l = sub.add_parser('abl', help='设备 abl 是联想原厂 495 时：准备替换用的 CN 17.0.04.279 abl（只读，不连设备；package 会自动做）')
+    l.add_argument('source', nargs='?', default=None,
+                   help='不写就用仓库自带的 firmware/lenovo-cn-279/abl.elf；也可以是联想官方 CN 17.0.04.279 线刷包'
+                        '（.7z / .zip / 文件夹）或 abl 镜像')
     k = sub.add_parser('package', help='打成这台平板的刷机包（带/不带查找设备两个 super + manifest）')
     k.add_argument('--find', help='带查找设备的 bootchain 输出目录（默认最新）')
     k.add_argument('--nofind', help='不带查找设备的 bootchain 输出目录（默认最新）')
