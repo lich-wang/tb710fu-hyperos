@@ -23,5 +23,6 @@ __pycache__/
 !/tools/avb/testkey_rsa4096.pem
 !/tools/avb/testkey_rsa2048.pem
 !/tools/apksign/testkey.x509.pem
+!/firmware/lenovo-zuxos-495/xbl_s_devprg_ns.melf
 edl_config.json
 /tools/venv/

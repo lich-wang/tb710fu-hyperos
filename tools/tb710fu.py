@@ -26,7 +26,7 @@ device profile (work/device/latest.json: slot, rollback indexes, super layout, f
 the later steps (pull / build / flash) use. Only flash and restore write to the device, and only after the
 user confirms the printed plan.
 
-Options: --loader FILE (9008 firehose programmer; default work/firehose/*), --serial (adb), --no-firmware
+Options: --loader FILE (9008 firehose programmer; default work/firehose/*, else the repository copy), --serial (adb), --no-firmware
 (skip the firmware fingerprint, faster), --no-reset (stay in 9008 afterwards).
 Python 3.8+, standard library only; 9008 needs bkerler/edl (`pip install edlclient`, or $EDL).
 """

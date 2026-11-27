@@ -42,4 +42,14 @@ sha256：
 联想 "495 免解锁补充包" 的 abl.img，也和 Freedom 安装器内置的 `abl_aosp_capable.img` 相同。
 代码每次使用都按 `tools/tb/abl.py` 的 `PINNED` 核对 sha256；不想用仓库这份，`tb710fu.py abl <联想官方包>` 可以自己取。
 
-不放进仓库的：bkerler/edl（`doctor` 给出安装命令，装在 `tools/venv/`）、9008 加载器（联想官方包里的二进制，放 `work/firehose/`）。
+## 9008 加载器
+
+| 文件 | 来源 | 字节 | sha256 |
+|---|---|---|---|
+| `firmware/lenovo-zuxos-495/xbl_s_devprg_ns.melf` | 联想官方原厂 ZUXOS 1.5.04.495 线刷包（`TB710_ZUXOS_1.5.04.495_Tool.7z`）`image/` 里的 `xbl_s_devprg_ns.melf`，原样（`tools/tb/stock_495.json` 记录了同一个 sha256） | 1573224 | `66e3c894bc5d642b3ba26b04a68ffb4664a2f0c79f6702c261b9fa0dda0a73ef` |
+
+联想 / 高通的二进制（高通签名的 firehose programmer），不是本项目的代码，不在 GPL-2.0 范围内。参考平板的所有 9008 读写
+（`check`、`backup`、`flash`、`restore-stock`）都用的是它。放进仓库是为了不让每个人为了 1.5 MB 再下载约 10 GB 的线刷包。
+没有 `--loader`、`$TB_LOADER`，`work/firehose/` 里也没有加载器时，工具用这一份；`doctor` 会显示用的是哪个、是否已知。
+
+不放进仓库的：bkerler/edl（`doctor` 给出安装命令，装在 `tools/venv/`）。
