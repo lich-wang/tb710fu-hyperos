@@ -11,10 +11,10 @@
 > `keystore`、`ssd`、`secdata`、`uefivarstore`、`cdt`、`ddr`）**任何时候都不要写**，动手前先完整备份。
 > 一切后果自负。
 
-## 状态：测试中，邀请真机测试
+## 状态：参考平板真机跑通，邀请更多人测试
 
-`tools/tb710fu.py` 的每一步都能在电脑上完整跑通（构建已在真实输入上跑过），刷入命令在模拟环境里测过，
-**但还没有在任何一台真机上写入过**。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
+参考平板（作者自己的一台）上已真机跑通：从联想官方原厂 ZUXOS 1.5.04.495 两阶段刷入小米 OS4.0.5.0（2026-11-24；BL 锁着、`verifiedbootstate=green`、dm-verity 开）；之后 `flash --stage upgrade` 不清数据升级两次；装了 ArmadaOS Freedom 后用 `flash --stage system` 升到 OS4.0.12.0，Freedom 不受影响；`restore-stock` 多次刷回联想原厂。还没在真机上用过的：`restore`（写回自己的备份）。
+**目前只有这一台真机**，不同原厂版本、不同机器的结果还需要更多人来测。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
 结果用 [刷机报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 提交（成功、失败、只跑到 `check` 都有用）。
 
 > **推荐用 AI Agent 来做**：让一个能执行命令的 AI 编程 Agent 先读 [`AGENT.md`](AGENT.md)。
