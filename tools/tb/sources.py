@@ -7,7 +7,7 @@ Both expose the same small interface used by the check:
   read_range(name, offset, length) -> bytes
 Nothing here writes to the device.
 """
-import glob, hashlib, os, platform, re, shutil, subprocess, tempfile
+import glob, hashlib, os, platform, re, shlex, shutil, subprocess, tempfile
 
 from . import layout
 
@@ -15,7 +15,10 @@ TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(TOOLS)
 WORK = os.path.abspath(os.environ.get('TB_WORK', os.path.join(REPO, 'work')))
 
+# xbl_s_devprg_ns.melf of Lenovo's official ZUXOS 1.5.04.495 9008 package, unchanged (tools/THIRD_PARTY.md)
+BUNDLED_LOADER = os.path.join(REPO, 'firmware', 'lenovo-zuxos-495', 'xbl_s_devprg_ns.melf')
 KNOWN_LOADERS = {   # sha256 -> description
+    '66e3c894bc5d642b3ba26b04a68ffb4664a2f0c79f6702c261b9fa0dda0a73ef': '联想官方原厂 ZUXOS 1.5.04.495 线刷包的 xbl_s_devprg_ns.melf（仓库自带）',
     'ad4689b1c52458250d46829ee46a89ec974e69f8e82eee8d4950427919e0b9eb': 'prog_firehose_ddr-TB710FU.melf（9008 包里的 xbl_s_devprg_ns.melf）',
 }
 
@@ -42,15 +45,22 @@ def edl_bin():
 
 
 def find_loader(given=None):
-    """Firehose programmer: --loader, $TB_LOADER or work/firehose/*."""
-    cands = [given, os.environ.get('TB_LOADER')]
-    d = os.path.join(WORK, 'firehose')
-    cands += sorted(glob.glob(os.path.join(d, '*.melf')) + glob.glob(os.path.join(d, '*.elf')))
-    for c in cands:
-        if c and os.path.isfile(c):
+    """Firehose programmer: --loader, $TB_LOADER, work/firehose/*, else the repository copy."""
+    for c, how in ((given, '--loader'), (os.environ.get('TB_LOADER'), '环境变量 TB_LOADER')):
+        if c:
+            if not os.path.isfile(c):
+                raise SourceError(f'{how} 指定的 9008 加载器 {c} 不存在：改正路径，或者改用仓库自带的'
+                                  f'（--loader {shlex.quote(BUNDLED_LOADER)}；去掉这个设置时会先用 '
+                                  f'{"$TB_LOADER、" if how == "--loader" else ""}work/firehose/ 里的，都没有才用仓库这份）')
             return os.path.abspath(c)
-    raise SourceError('找不到 9008 firehose 加载器。用 --loader 指定，或放到 work/firehose/：'
-                      '联想官方线刷包里的 xbl_s_devprg_ns.melf / prog_firehose_ddr*.melf。')
+    d = os.path.join(WORK, 'firehose')
+    for c in sorted(glob.glob(os.path.join(d, '*.melf')) + glob.glob(os.path.join(d, '*.elf'))):
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+    if os.path.isfile(BUNDLED_LOADER):
+        return BUNDLED_LOADER
+    raise SourceError(f'找不到 9008 firehose 加载器：仓库里的 {BUNDLED_LOADER} 不见了（git checkout -- firmware），'
+                      '或者用 --loader 指定联想官方线刷包里的 xbl_s_devprg_ns.melf。')
 
 
 def usb_mode():

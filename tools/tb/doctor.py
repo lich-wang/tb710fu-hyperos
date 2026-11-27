@@ -4,7 +4,7 @@ Read only. `doctor` checks the computer, the tools, the downloads and the GitHub
 entering 9008 by hand (the button combination), confirms that edl can talk to the tablet (printgpt, read only)
 and resets it. Nothing is written to the tablet.
 """
-import glob, hashlib, os, platform, re, shutil, subprocess, sys, time
+import glob, hashlib, os, platform, re, shlex, shutil, subprocess, sys, time
 
 from . import miuicamera, sources
 from .sources import TOOLS, WORK, SourceError
@@ -193,11 +193,9 @@ def check_downloads(r, verify, loader=None):
             r.ok(f'9008 加载器 {loader}（已知：{sources.KNOWN_LOADERS[sha]}）')
         else:
             r.note(f'9008 加载器 {loader} 不是已验证过的那个（sha256 {sha[:16]}…）',
-                   '多半也能用；连不上时换联想官方包里的 xbl_s_devprg_ns.melf')
-    except SourceError:
-        r.fail('没有 9008 加载器（firehose）',
-               '从联想官方 9008 包里取出 xbl_s_devprg_ns.melf 放到 work/firehose/，例如：'
-               f'7zz e 联想包.7z -owork/firehose -r xbl_s_devprg_ns.melf（包的地址见下面）')
+                   f'多半也能用；连不上时明确改用仓库自带的：--loader {shlex.quote(sources.BUNDLED_LOADER)}')
+    except SourceError as e:
+        r.fail(f'没有 9008 加载器（firehose）：{e}')
     found = []
     for name, size, md5p, url in XIAOMI:
         hits = glob.glob(os.path.join(WORK, '**', name), recursive=True) + glob.glob(os.path.join(WORK, '..', name))
@@ -225,8 +223,8 @@ def check_downloads(r, verify, loader=None):
     if pk:
         r.ok('联想官方包：' + '、'.join(os.path.basename(p) for p in pk))
     else:
-        r.note('没有联想官方 9008 包：平板还是原厂系统时不需要（pull 从你自己的备份取）；'
-               '已刷过别的系统、或要取 9008 加载器时才需要',
+        r.note('没有联想官方 9008 包：平板还是原厂系统时不需要（pull 从你自己的备份取；9008 加载器、CN 279 abl 仓库自带）；'
+               '已刷过别的系统、平板备份里没有原厂组件时才需要',
                '国行包（海外 ROW 包 pull --package 用不了）：\n' + '\n'.join(
                    f'       {v}：{LOLINET}{f}（{s} 字节）' for v, f, s in LENOVO))
 

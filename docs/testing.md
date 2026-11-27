@@ -32,7 +32,7 @@
 | 工具 | `e2fsprogs`、`erofs-utils`（`mkfs.erofs` 需支持 `--tar`）、`lz4`、`7zz` 或 `7z`（读 .7z 包）、[bkerler/edl](https://github.com/bkerler/edl)、[GitHub CLI](https://cli.github.com/)（`gh`，已 `gh auth login`，用来提交报告） |
 | AOSP 工具 | 仓库自带，不用另外下载：`tools/avb/`（`avbtool.py` 和两把测试密钥）、`tools/mkbootimg/`（`mkbootimg.py`、`unpack_bootimg.py`）、`tools/apksign/`（重签小米相机的 AOSP 测试密钥），见 [tools/THIRD_PARTY.md](../tools/THIRD_PARTY.md) |
 | 小米相机前摄修复 | Java（JDK）、[apktool](https://apktool.org/)、`zipalign`、`apksigner`（Android SDK build-tools）：`framework` 给小米相机打补丁要用（见 [porting.md](porting.md) 的 #48） |
-| 9008 加载器 | 联想官方 9008 包里的 `xbl_s_devprg_ns.melf` / `prog_firehose_ddr*.melf`，放到 `work/firehose/`（或 `--loader` 指定；不进仓库） |
+| 9008 加载器 | 仓库自带（`firmware/lenovo-zuxos-495/xbl_s_devprg_ns.melf`，联想官方原厂 495 线刷包里的那份），不用另外准备；`work/firehose/` 里放了别的、或 `--loader` 指定时用那个 |
 
 ```bash
 # macOS
@@ -64,8 +64,8 @@ python3 tools/tb710fu.py doctor --usb                 # 9008 实操：按提示�
 
   文件名最后的 10 位十六进制是 md5 的前 10 位，`--verify-downloads` 会核对。大文件用 `aria2c -c -x 16 -s 16 <地址>`（可断点续传）。
   下面命令里的版本号换成你下载的那个。
-- **联想官方 9008 包**（视情况）：平板还是原厂系统时不需要（`pull` 从你自己的备份取）；已刷过别的系统时要用它取联想组件。
-  9008 加载器也在这个包里（`xbl_s_devprg_ns.melf`）：`7zz e 联想包.7z -owork/firehose -r xbl_s_devprg_ns.melf`。地址见 [boot-chain.md](boot-chain.md) 或 `doctor` 的输出。
+- **联想官方 9008 包**（视情况）：平板还是原厂系统时不需要（`pull` 从你自己的备份取；9008 加载器、原厂 495 要换的 CN 279 abl 仓库自带）；
+  已刷过别的系统时要用它取联想组件。地址见 [boot-chain.md](boot-chain.md) 或 `doctor` 的输出。
 - **USB 驱动**：macOS 不需要装驱动；Linux 要有高通 9008（`05c6`）的 udev 规则，ModemManager 最好先停掉，`doctor` 会检查；Windows 暂不支持。
   用能传数据的线，直接插电脑上的口。
 - **手动进 9008 必须会**：刷机中途平板开不了机时，只能靠按键进 9008 救回来，所以 `doctor --usb` 要求用按键进：
@@ -115,7 +115,8 @@ python3 tools/tb710fu.py restore        # 用你这台平板自己的备份写�
 ```
 
 想从联想原厂系统重新开始，或者 `restore` 因为分区表变了用不了：`restore-stock` 用联想官方原厂 ZUXOS 1.5.04.495 线刷包恢复
-（会清空数据，不写唯一数据分区；也要先有这台平板的完整备份；包有解压密码，本仓库不提供），详见 [boot-chain.md](boot-chain.md) 的"恢复联想官方原厂"。已在参考平板上真机恢复成功过。
+（会清空数据，不写唯一数据分区；也要先有这台平板的完整备份；包有解压密码，本仓库不提供）。
+包的地址：`https://zsk-cdn.lenovows.com/%E7%9F%A5%E8%AF%86%E5%BA%93/Flash_tool_image/TB710_ZUXOS_1.5.04.495_Tool.7z`（10156610508 字节，sha256 `d225179f…`，工具会核对；`--package` 指向下好的文件，不指定时工具自己下载）。详见 [boot-chain.md](boot-chain.md) 的"恢复联想官方原厂"。已在参考平板上真机恢复成功过。
 
 ```bash
 python3 tools/tb710fu.py restore-stock --dry-run --package TB710_ZUXOS_1.5.04.495_Tool.7z
