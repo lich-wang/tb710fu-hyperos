@@ -25,7 +25,7 @@
 | 项目 | 要求 |
 |---|---|
 | 平板 | TB710FU。原厂系统任意版本都可以先跑 `check`；ABL 必须信任 AOSP 测试密钥（`check` 会告诉你） |
-| 电脑 | Linux（构建已在 Ubuntu 上完整跑通）或 macOS（`check` / `backup` / `pull` 实测过，构建步骤用的是同样的工具）。Windows 暂不支持 |
+| 电脑 | Linux（构建已在 Ubuntu 上完整跑通）或 macOS（`check` / `backup` / `pull` 实测过，构建步骤用的是同样的工具）。Windows：在 WSL2（Ubuntu 24.04）里用，见下面的「Windows（WSL2）」，**还没有人实测过** |
 | 磁盘 | 建议至少 150 GB 空闲：完整备份约 25 GB、联想包 7–8 GB、小米 OTA 约 10 GB、导入后 12 GB、构建中间产物和刷机包约 40 GB、写入时读回 super 约 11 GB |
 | Python | 3.8 以上，只用标准库 |
 | 工具 | `e2fsprogs`、`erofs-utils`（`mkfs.erofs` 需支持 `--tar`）、`lz4`、`7zz` 或 `7z`（读 .7z 包）、[bkerler/edl](https://github.com/bkerler/edl)、[GitHub CLI](https://cli.github.com/)（`gh`，已 `gh auth login`，用来提交报告） |
@@ -46,6 +46,25 @@ sudo apt install e2fsprogs erofs-utils lz4 7zip python3 gh default-jre-headless 
 python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl
 ```
 
+### Windows（WSL2，还没有人实测过）
+
+Windows 上不能直接运行：构建要 Linux 的 e2fsprogs / erofs-utils，还要保留每个文件的属主、权限和 SELinux 标签。
+WSL2 里就是一个真正的 Ubuntu，构建和 Linux 完全一样；9008 设备用微软推荐的 [usbipd-win](https://github.com/dorssel/usbipd-win) 挂进 WSL。
+这条路**还没有人在真机上走通过**，第一次用请照常提刷机报告，写明是 WSL2。
+
+1. 装 WSL2 和 Ubuntu（管理员 PowerShell）：`wsl --install -d Ubuntu-24.04`，重启后打开 Ubuntu 设好用户名。
+   已经有 WSL1 的发行版：`wsl --set-version <名字> 2`。Ubuntu 24.04 的 erofs-utils 支持 `--tar`，更老的版本不一定。
+2. **仓库要克隆到 WSL 自己的文件系统里**（例如 `cd ~ && git clone https://github.com/lich-wang/tb710fu-hyperos`），
+   不要放在 `/mnt/c/...`：Windows 的盘不区分大小写、存不了文件权限和扩展属性，构建会出错，`doctor` 会拒绝。
+   WSL 默认最多用一半内存、磁盘放在 C 盘的虚拟磁盘里：C 盘要留出 150 GB 以上。
+3. 在 Ubuntu 里按上面「Debian / Ubuntu」一行装工具，再装 edl（同上）。
+4. 装 usbipd-win（管理员 PowerShell）：`winget install usbipd`。
+5. 每次要用 9008 时：平板按住音量+插线进 9008 → 管理员 PowerShell 里 `usbipd list` 找到 `05c6:9008` 那一行的 BUSID →
+   `usbipd bind --busid <BUSID>`（同一个 USB 口只要做一次）→ `usbipd attach --wsl --busid <BUSID> --auto-attach`，**这个窗口一直开着**。
+   平板每次重新进 9008、工具每次让平板复位，USB 都会断开重连，`--auto-attach` 会自动重新挂进 WSL。
+   在 Ubuntu 里 `lsusb` 能看到 `05c6:9008` 就说明挂进来了。
+6. 之后的步骤和 Linux 完全一样（udev 规则也一样装）。`doctor` 会认出 WSL2 并检查工作目录的位置。
+
 ### 环境检查（动平板之前必须过）
 
 ```bash
@@ -65,7 +84,7 @@ python3 tools/tb710fu.py doctor --usb                 # 9008 实操：按提示�
   下面命令里的版本号换成你下载的那个。
 - **联想官方 9008 包**（视情况）：平板还是原厂系统时不需要（`pull` 从你自己的备份取；9008 加载器、原厂 495 要换的 CN 279 abl 仓库自带）；
   已刷过别的系统时要用它取联想组件。地址见 [boot-chain.md](boot-chain.md) 或 `doctor` 的输出。
-- **USB 驱动**：macOS 不需要装驱动；Linux 要有高通 9008（`05c6`）的 udev 规则，ModemManager 最好先停掉，`doctor` 会检查；Windows 暂不支持。
+- **USB 驱动**：macOS 不需要装驱动；Linux 要有高通 9008（`05c6`）的 udev 规则，ModemManager 最好先停掉，`doctor` 会检查；Windows（WSL2）用 usbipd-win 把 9008 设备挂进 WSL，见「Windows（WSL2）」。
   用能传数据的线，直接插电脑上的口。
 - **手动进 9008 必须会**：刷机中途平板开不了机时，只能靠按键进 9008 救回来，所以 `doctor --usb` 要求用按键进：
   拔线 → 长按电源 15–20 秒彻底关机 → 按住音量+（只按音量+）→ 插线（屏幕保持全黑就对了）。`doctor --usb` 通过了才继续。

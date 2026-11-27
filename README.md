@@ -17,6 +17,8 @@
 **目前只有这一台真机**，不同原厂版本、不同机器的结果还需要更多人来测。愿意帮忙测试的，请看 **[docs/testing.md](docs/testing.md)**，
 结果用 [刷机报告](https://github.com/lich-wang/tb710fu-hyperos/issues/new?template=flash-report.yml) 提交（成功、失败、只跑到 `check` 都有用）。
 
+电脑：macOS、Linux；Windows 在 WSL2 里用（还没有人实测过，步骤见 [docs/testing.md](docs/testing.md) 的「Windows（WSL2）」）。
+
 > **推荐用 AI Agent 来做**：让一个能执行命令的 AI 编程 Agent 先读 [`AGENT.md`](AGENT.md)。
 > 它只用仓库里的脚本，遇到问题不刷机，整理好报告给你看过后用 `gh` 提 issue；进 9008、写入前的确认都由你来做。
 
