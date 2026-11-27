@@ -4,7 +4,7 @@ Read only. `doctor` checks the computer, the tools, the downloads and the GitHub
 entering 9008 by hand (the button combination), confirms that edl can talk to the tablet (printgpt, read only)
 and resets it. Nothing is written to the tablet.
 """
-import glob, hashlib, os, platform, re, shutil, subprocess, sys, time
+import glob, hashlib, os, platform, re, shlex, shutil, subprocess, sys, time
 
 from . import miuicamera, sources
 from .sources import TOOLS, WORK, SourceError
@@ -193,7 +193,7 @@ def check_downloads(r, verify, loader=None):
             r.ok(f'9008 加载器 {loader}（已知：{sources.KNOWN_LOADERS[sha]}）')
         else:
             r.note(f'9008 加载器 {loader} 不是已验证过的那个（sha256 {sha[:16]}…）',
-                   f'多半也能用；连不上时明确改用仓库自带的：--loader {sources.BUNDLED_LOADER}')
+                   f'多半也能用；连不上时明确改用仓库自带的：--loader {shlex.quote(sources.BUNDLED_LOADER)}')
     except SourceError as e:
         r.fail(f'没有 9008 加载器（firehose）：{e}')
     found = []

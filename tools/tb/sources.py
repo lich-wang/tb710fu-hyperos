@@ -7,7 +7,7 @@ Both expose the same small interface used by the check:
   read_range(name, offset, length) -> bytes
 Nothing here writes to the device.
 """
-import glob, hashlib, os, platform, re, shutil, subprocess, tempfile
+import glob, hashlib, os, platform, re, shlex, shutil, subprocess, tempfile
 
 from . import layout
 
@@ -46,11 +46,12 @@ def edl_bin():
 
 def find_loader(given=None):
     """Firehose programmer: --loader, $TB_LOADER, work/firehose/*, else the repository copy."""
-    for c in (given, os.environ.get('TB_LOADER')):
+    for c, how in ((given, '--loader'), (os.environ.get('TB_LOADER'), '环境变量 TB_LOADER')):
         if c:
             if not os.path.isfile(c):
-                raise SourceError(f'指定的 9008 加载器 {c} 不存在（--loader 或 $TB_LOADER）：改正路径，'
-                                  f'或者去掉这个设置用仓库自带的 {BUNDLED_LOADER}')
+                raise SourceError(f'{how} 指定的 9008 加载器 {c} 不存在：改正路径，或者改用仓库自带的'
+                                  f'（--loader {shlex.quote(BUNDLED_LOADER)}；去掉这个设置时会先用 '
+                                  f'{"$TB_LOADER、" if how == "--loader" else ""}work/firehose/ 里的，都没有才用仓库这份）')
             return os.path.abspath(c)
     d = os.path.join(WORK, 'firehose')
     for c in sorted(glob.glob(os.path.join(d, '*.melf')) + glob.glob(os.path.join(d, '*.elf'))):
