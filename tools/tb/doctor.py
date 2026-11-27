@@ -76,10 +76,20 @@ def install_hint(mac, linux):
 def check_computer(r):
     print('\n[电脑与工具]')
     system = platform.system()
-    if system in ('Darwin', 'Linux'):
+    wsl = sources.wsl_version()
+    if wsl == 2:
+        r.ok(f'系统 Windows WSL2 {platform.release()}（{platform.machine()}）')
+        r.note('WSL2 这条路还没有人真机走通过', '遇到问题按 docs/testing.md 提刷机报告，写明是 WSL2')
+    elif wsl == 1:
+        r.fail('系统是 WSL1：USB 设备挂不进来、构建工具也跑不全',
+               '在 Windows 里 wsl --set-version <发行版> 2（或 wsl --install -d Ubuntu 装一个新的），见 docs/testing.md')
+    elif system in ('Darwin', 'Linux'):
         r.ok(f'系统 {system} {platform.release()}（{platform.machine()}）')
+    elif system == 'Windows':
+        r.fail('Windows 上不能直接用：构建要 Linux 的 e2fsprogs / erofs-utils，还要保留文件属主、权限和 SELinux 标签',
+               '在 WSL2（Ubuntu）里运行本工具，见 docs/testing.md 的「Windows（WSL2）」')
     else:
-        r.fail(f'系统 {system}：暂不支持', '用 macOS 或 Linux（Windows 的 9008 驱动和 erofs 工具还没整理）')
+        r.fail(f'系统 {system}：暂不支持', '用 macOS、Linux，或 Windows 的 WSL2')
     if sys.version_info >= (3, 8):
         r.ok(f'Python {platform.python_version()}')
     else:
@@ -111,7 +121,8 @@ def check_computer(r):
     code, out = run_out([edl, '--help'])
     if code is None or 'usage' not in out.lower():
         r.fail(f'edl 跑不起来（{edl}）',
-               'python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl')
+               'python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl'
+               '（Debian / Ubuntu 先 sudo apt install python3-venv）')
     else:
         r.ok(f'edl（{edl}）')
     if which_any('adb'):
@@ -232,6 +243,10 @@ def check_downloads(r, verify, loader=None):
 def check_disk(r):
     print('\n[磁盘]')
     os.makedirs(WORK, exist_ok=True)
+    winfs = sources.windows_drive(WORK)
+    if winfs:
+        r.fail(f'工作目录 {WORK} 在 Windows 的盘上（{winfs}）：不区分大小写、存不了文件权限和扩展属性，构建会出错，而且很慢',
+               '把仓库克隆到 WSL 自己的文件系统里（例如 ~/tb710fu-hyperos），或用 TB_WORK 指到 ~ 下的目录')
     free = shutil.disk_usage(WORK).free
     msg = f'{WORK} 所在磁盘剩余 {free / 2**30:.0f} GiB'
     if free >= MIN_FREE:
@@ -295,6 +310,8 @@ def check_usb_host(r):
         code, out = run_out(['systemctl', 'is-active', 'ModemManager'])
         if out.strip() == 'active':
             r.note('ModemManager 在运行，可能抢占 9008 设备', 'sudo systemctl stop ModemManager（刷完再启动）')
+    if sources.wsl_version():
+        r.note('WSL 看不到 Windows 的 USB 设备，9008 要用 usbipd-win 挂进来', sources.WSL_USB_STEPS)
     r.note('用能传数据的线，直接插电脑上的口，不要经过扩展坞 / 集线器')
 
 
@@ -327,7 +344,8 @@ def usb_practice(r, loader=None, timeout=180):
         r.fail('平板在 900E（内核崩溃转储模式），不是 9008', '拔线，长按电源 15–20 秒关机，再按上面的步骤进 9008')
         return
     if mode is None:
-        r.fail('等不到 9008 设备', '确认第 2 步彻底关机、第 3 步两个音量键一起按住再插线；换线 / 换口')
+        r.fail('等不到 9008 设备', '确认第 2 步彻底关机、第 3 步按住音量+再插线；换线 / 换口'
+               + (f'。WSL：{sources.WSL_USB_STEPS}' if sources.wsl_version() else ''))
         return
     os.makedirs(os.path.join(WORK, 'device'), exist_ok=True)
     log = os.path.join(WORK, 'device', f'edl-doctor-{time.strftime("%Y%m%d-%H%M%S")}.log')

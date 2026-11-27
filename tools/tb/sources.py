@@ -63,6 +63,46 @@ def find_loader(given=None):
                       '或者用 --loader 指定联想官方线刷包里的 xbl_s_devprg_ns.melf。')
 
 
+def wsl_version():
+    """2 inside WSL2, 1 inside WSL1, None elsewhere (Windows users run this tool in WSL2)."""
+    if platform.system() != 'Linux':
+        return None
+    try:
+        rel = open('/proc/sys/kernel/osrelease').read().lower()
+    except OSError:
+        rel = platform.release().lower()
+    if 'microsoft' not in rel and not os.environ.get('WSL_DISTRO_NAME'):
+        return None
+    return 2 if ('wsl2' in rel or 'microsoft-standard' in rel) else 1
+
+
+def windows_drive(path):
+    """Inside WSL: the filesystem type when `path` lives on a Windows drive (drvfs / 9p), else None.
+
+    Decided by the mount the path is on (/proc/self/mountinfo), not by a /mnt/ prefix: the automount root can be
+    changed in wsl.conf, and `wsl --mount` puts real ext4 disks under /mnt/wsl."""
+    if not wsl_version():
+        return None
+    real = os.path.realpath(path)
+    best, fstype = '', None
+    try:
+        for line in open('/proc/self/mountinfo'):
+            left, _, right = line.partition(' - ')
+            mnt = left.split()[4].replace('\\040', ' ')
+            if (real == mnt or real.startswith(mnt.rstrip('/') + '/')) and len(mnt) >= len(best):
+                best, fstype = mnt, right.split()[0]
+    except (OSError, IndexError):
+        return None
+    return fstype if fstype in ('drvfs', '9p', 'v9fs') else None
+
+
+# How a 9008 device reaches WSL2: usbipd-win on the Windows side. The tablet re-enumerates every time it enters
+# 9008 (and after each reset), so the attach has to be the auto-attach kind.
+WSL_USB_STEPS = ('在 Windows 里（管理员 PowerShell）：winget install --interactive --exact dorssel.usbipd-win（安装要重启时会先问你）；平板进 9008 后 usbipd list 找到 05c6:9008 的 BUSID，'
+                 'usbipd bind --busid <BUSID>（每个 USB 口只要一次），再 usbipd attach --wsl --busid <BUSID> --auto-attach'
+                 '（窗口一直开着，平板每次重新进 9008 会自动挂进 WSL）')
+
+
 def usb_mode():
     """'9008', '900e', None, or 'unknown' when it cannot be detected (edl is the real check)."""
     try:
@@ -100,7 +140,8 @@ class EdlSource:
                               '再按住音量+插线进 9008。')
         if mode is None:
             raise SourceError('没检测到 9008 设备。进入 9008：已 root 的系统里 `adb reboot edl`；'
-                              '或拔线 → 长按电源 15–20 秒关机 → 按住音量+插线。')
+                              '或拔线 → 长按电源 15–20 秒关机 → 按住音量+插线。'
+                              + (f'WSL 里还要把设备挂进来：{WSL_USB_STEPS}。' if wsl_version() else ''))
         out = self.edl('printgpt', ok=r'Parsing Lun 0')
         self.sahara = layout.sahara_info(out)
         self.parts = layout.parse_printgpt(out)
