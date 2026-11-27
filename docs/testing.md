@@ -41,7 +41,7 @@ brew install e2fsprogs erofs-utils lz4 sevenzip python@3.12 gh openjdk apktool
 export JAVA_HOME="$(brew --prefix openjdk)/libexec/openjdk.jdk/Contents/Home" PATH="$(brew --prefix openjdk)/bin:$PATH"
 brew install --cask android-commandlinetools && sdkmanager "build-tools;36.0.0"
 # Debian / Ubuntu
-sudo apt install e2fsprogs erofs-utils lz4 7zip python3 gh default-jre-headless apktool zipalign apksigner
+sudo apt install e2fsprogs erofs-utils lz4 7zip python3 python3-venv gh default-jre-headless apktool zipalign apksigner
 # edl（两边一样）
 python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl
 ```
@@ -54,11 +54,11 @@ WSL2 里就是一个真正的 Ubuntu，构建和 Linux 完全一样；9008 设�
 
 1. 装 WSL2 和 Ubuntu（管理员 PowerShell）：`wsl --install -d Ubuntu-24.04`，重启后打开 Ubuntu 设好用户名。
    已经有 WSL1 的发行版：`wsl --set-version <名字> 2`。Ubuntu 24.04 的 erofs-utils 支持 `--tar`，更老的版本不一定。
-2. **仓库要克隆到 WSL 自己的文件系统里**（例如 `cd ~ && git clone https://github.com/lich-wang/tb710fu-hyperos`），
+2. **仓库要克隆到 WSL 自己的文件系统里**（例如 `cd ~ && git clone https://github.com/lich-wang/tb710fu-hyperos && cd tb710fu-hyperos`，之后的命令都在这个目录里运行），
    不要放在 `/mnt/c/...`：Windows 的盘不区分大小写、存不了文件权限和扩展属性，构建会出错，`doctor` 会拒绝。
    WSL 默认最多用一半内存、磁盘放在 C 盘的虚拟磁盘里：C 盘要留出 150 GB 以上。
 3. 在 Ubuntu 里按上面「Debian / Ubuntu」一行装工具，再装 edl（同上）。
-4. 装 usbipd-win（管理员 PowerShell）：`winget install usbipd`。
+4. 装 usbipd-win（管理员 PowerShell）：`winget install --interactive --exact dorssel.usbipd-win`（`--interactive`：装驱动要重启时先问你，不会直接重启）。
 5. 每次要用 9008 时：平板按住音量+插线进 9008 → 管理员 PowerShell 里 `usbipd list` 找到 `05c6:9008` 那一行的 BUSID →
    `usbipd bind --busid <BUSID>`（同一个 USB 口只要做一次）→ `usbipd attach --wsl --busid <BUSID> --auto-attach`，**这个窗口一直开着**。
    平板每次重新进 9008、工具每次让平板复位，USB 都会断开重连，`--auto-attach` 会自动重新挂进 WSL。

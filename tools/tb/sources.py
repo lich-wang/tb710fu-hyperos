@@ -76,9 +76,29 @@ def wsl_version():
     return 2 if ('wsl2' in rel or 'microsoft-standard' in rel) else 1
 
 
+def windows_drive(path):
+    """Inside WSL: the filesystem type when `path` lives on a Windows drive (drvfs / 9p), else None.
+
+    Decided by the mount the path is on (/proc/self/mountinfo), not by a /mnt/ prefix: the automount root can be
+    changed in wsl.conf, and `wsl --mount` puts real ext4 disks under /mnt/wsl."""
+    if not wsl_version():
+        return None
+    real = os.path.realpath(path)
+    best, fstype = '', None
+    try:
+        for line in open('/proc/self/mountinfo'):
+            left, _, right = line.partition(' - ')
+            mnt = left.split()[4].replace('\\040', ' ')
+            if (real == mnt or real.startswith(mnt.rstrip('/') + '/')) and len(mnt) >= len(best):
+                best, fstype = mnt, right.split()[0]
+    except (OSError, IndexError):
+        return None
+    return fstype if fstype in ('drvfs', '9p', 'v9fs') else None
+
+
 # How a 9008 device reaches WSL2: usbipd-win on the Windows side. The tablet re-enumerates every time it enters
 # 9008 (and after each reset), so the attach has to be the auto-attach kind.
-WSL_USB_STEPS = ('在 Windows 里（管理员 PowerShell）：winget install usbipd；平板进 9008 后 usbipd list 找到 05c6:9008 的 BUSID，'
+WSL_USB_STEPS = ('在 Windows 里（管理员 PowerShell）：winget install --interactive --exact dorssel.usbipd-win（安装要重启时会先问你）；平板进 9008 后 usbipd list 找到 05c6:9008 的 BUSID，'
                  'usbipd bind --busid <BUSID>（每个 USB 口只要一次），再 usbipd attach --wsl --busid <BUSID> --auto-attach'
                  '（窗口一直开着，平板每次重新进 9008 会自动挂进 WSL）')
 

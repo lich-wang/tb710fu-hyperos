@@ -121,7 +121,8 @@ def check_computer(r):
     code, out = run_out([edl, '--help'])
     if code is None or 'usage' not in out.lower():
         r.fail(f'edl 跑不起来（{edl}）',
-               'python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl')
+               'python3 -m venv tools/venv && tools/venv/bin/pip install git+https://github.com/bkerler/edl'
+               '（Debian / Ubuntu 先 sudo apt install python3-venv）')
     else:
         r.ok(f'edl（{edl}）')
     if which_any('adb'):
@@ -241,10 +242,11 @@ def check_downloads(r, verify, loader=None):
 
 def check_disk(r):
     print('\n[磁盘]')
-    if sources.wsl_version() and os.path.realpath(WORK).startswith('/mnt/'):
-        r.fail(f'工作目录 {WORK} 在 Windows 的盘上（/mnt/…）：不区分大小写、存不了文件权限和扩展属性，构建会出错，而且很慢',
-               '把仓库克隆到 WSL 自己的文件系统里（例如 ~/tb710fu-hyperos），或用 TB_WORK 指到 ~ 下的目录')
     os.makedirs(WORK, exist_ok=True)
+    winfs = sources.windows_drive(WORK)
+    if winfs:
+        r.fail(f'工作目录 {WORK} 在 Windows 的盘上（{winfs}）：不区分大小写、存不了文件权限和扩展属性，构建会出错，而且很慢',
+               '把仓库克隆到 WSL 自己的文件系统里（例如 ~/tb710fu-hyperos），或用 TB_WORK 指到 ~ 下的目录')
     free = shutil.disk_usage(WORK).free
     msg = f'{WORK} 所在磁盘剩余 {free / 2**30:.0f} GiB'
     if free >= MIN_FREE:
