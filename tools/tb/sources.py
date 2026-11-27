@@ -49,7 +49,8 @@ def find_loader(given=None):
     for c in (given, os.environ.get('TB_LOADER')):
         if c:
             if not os.path.isfile(c):
-                raise SourceError(f'指定的 9008 加载器 {c} 不存在')
+                raise SourceError(f'指定的 9008 加载器 {c} 不存在（--loader 或 $TB_LOADER）：改正路径，'
+                                  f'或者去掉这个设置用仓库自带的 {BUNDLED_LOADER}')
             return os.path.abspath(c)
     d = os.path.join(WORK, 'firehose')
     for c in sorted(glob.glob(os.path.join(d, '*.melf')) + glob.glob(os.path.join(d, '*.elf'))):

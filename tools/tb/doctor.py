@@ -193,9 +193,9 @@ def check_downloads(r, verify, loader=None):
             r.ok(f'9008 加载器 {loader}（已知：{sources.KNOWN_LOADERS[sha]}）')
         else:
             r.note(f'9008 加载器 {loader} 不是已验证过的那个（sha256 {sha[:16]}…）',
-                   f'多半也能用；连不上时删掉它，用仓库自带的 {sources.BUNDLED_LOADER}')
+                   f'多半也能用；连不上时明确改用仓库自带的：--loader {sources.BUNDLED_LOADER}')
     except SourceError as e:
-        r.fail(f'没有 9008 加载器（firehose）：{e}', '重新检出仓库（git checkout -- firmware）')
+        r.fail(f'没有 9008 加载器（firehose）：{e}')
     found = []
     for name, size, md5p, url in XIAOMI:
         hits = glob.glob(os.path.join(WORK, '**', name), recursive=True) + glob.glob(os.path.join(WORK, '..', name))
